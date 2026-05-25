@@ -1,0 +1,194 @@
+{
+ "actions": [],
+ "creation": "2026-05-24 22:30:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "section_break_meta",
+  "catalog_id",
+  "graph_api_version",
+  "column_break_meta",
+  "whatsapp_account",
+  "access_token",
+  "section_break_defaults",
+  "default_currency",
+  "default_brand",
+  "default_condition",
+  "column_break_defaults",
+  "default_availability",
+  "price_markup_percent",
+  "sync_only_website_items",
+  "section_break_image",
+  "image_url_base",
+  "fallback_image_url",
+  "section_break_status",
+  "last_full_reconcile",
+  "last_full_reconcile_status",
+  "last_error"
+ ],
+ "fields": [
+  {
+   "default": "0",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled",
+   "description": "Master switch. When off, no Item write triggers any Meta API call."
+  },
+  {
+   "fieldname": "section_break_meta",
+   "fieldtype": "Section Break",
+   "label": "Meta API"
+  },
+  {
+   "depends_on": "enabled",
+   "fieldname": "catalog_id",
+   "fieldtype": "Data",
+   "label": "Catalog ID",
+   "description": "Numeric ID from Meta Commerce Manager (e.g. 1234567890123456)",
+   "mandatory_depends_on": "enabled"
+  },
+  {
+   "default": "v21.0",
+   "fieldname": "graph_api_version",
+   "fieldtype": "Data",
+   "label": "Graph API Version"
+  },
+  {
+   "fieldname": "column_break_meta",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "enabled",
+   "fieldname": "whatsapp_account",
+   "fieldtype": "Link",
+   "label": "Reuse Token From WhatsApp Account",
+   "options": "WhatsApp Account",
+   "description": "Optional. If set, the access_token of this WhatsApp Account is used (avoids duplicating tokens). Must have catalog_management scope."
+  },
+  {
+   "depends_on": "eval:doc.enabled && !doc.whatsapp_account",
+   "fieldname": "access_token",
+   "fieldtype": "Password",
+   "label": "Meta Access Token",
+   "description": "System User token with scopes: catalog_management (+ whatsapp_business_management if you also send product messages from here)."
+  },
+  {
+   "fieldname": "section_break_defaults",
+   "fieldtype": "Section Break",
+   "label": "Product Defaults"
+  },
+  {
+   "default": "MXN",
+   "fieldname": "default_currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency"
+  },
+  {
+   "default": "Celulares Doco",
+   "fieldname": "default_brand",
+   "fieldtype": "Data",
+   "label": "Default Brand",
+   "description": "Used when Item has no brand."
+  },
+  {
+   "default": "new",
+   "fieldname": "default_condition",
+   "fieldtype": "Select",
+   "label": "Default Condition",
+   "options": "new\nrefurbished\nused\nused_like_new\nused_good\nused_fair"
+  },
+  {
+   "fieldname": "column_break_defaults",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "in stock",
+   "fieldname": "default_availability",
+   "fieldtype": "Select",
+   "label": "Default Availability",
+   "options": "in stock\nout of stock\npreorder\navailable for order\ndiscontinued"
+  },
+  {
+   "default": "0",
+   "fieldname": "price_markup_percent",
+   "fieldtype": "Percent",
+   "label": "Price Markup %",
+   "description": "Optional positive percent added to Item standard_rate before publishing (e.g. 10 = sell on Meta at 10% above ERPNext price)."
+  },
+  {
+   "default": "1",
+   "fieldname": "sync_only_website_items",
+   "fieldtype": "Check",
+   "label": "Sync Only Website Items",
+   "description": "If on, only Item rows with show_in_website=1 (or with a Website Item record) are pushed. If off, every Item flows. Recommended ON to keep internal SKUs out of the customer-facing catalog."
+  },
+  {
+   "fieldname": "section_break_image",
+   "fieldtype": "Section Break",
+   "label": "Images"
+  },
+  {
+   "fieldname": "image_url_base",
+   "fieldtype": "Data",
+   "label": "Public Image URL Base",
+   "description": "Public HTTPS prefix Meta can crawl, e.g. https://ventas.docomexico.com. Item.image (relative path) gets prepended with this. If empty, frappe.utils.get_url() is used."
+  },
+  {
+   "fieldname": "fallback_image_url",
+   "fieldtype": "Data",
+   "label": "Fallback Image URL",
+   "description": "Used when an Item has no image. Public HTTPS PNG/JPG, square aspect ratio recommended (max 8 MB)."
+  },
+  {
+   "fieldname": "section_break_status",
+   "fieldtype": "Section Break",
+   "label": "Status",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "last_full_reconcile",
+   "fieldtype": "Datetime",
+   "label": "Last Full Reconcile",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_full_reconcile_status",
+   "fieldtype": "Data",
+   "label": "Last Reconcile Status",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_error",
+   "fieldtype": "Small Text",
+   "label": "Last Error",
+   "read_only": 1
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-05-24 22:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "Doco Meta Catalog",
+ "name": "Meta Catalog Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
