@@ -1,5 +1,7 @@
 # doco_meta_catalog — ERPNext Item → Meta Commerce Catalog bridge
 
+> ⚠ **Multi-agent stomping safeguard**: before any edit/restart, read [muelle/AGENTS.md → Coordination](../muelle/AGENTS.md#coordination--multi-agent-freshness-read-before-any-write). Use `bash ../muelle/scripts/muelle-restart.sh <svc> --reason "..."` not raw `docker compose restart`. Memory entries: `feedback_agent_freshness_protocol`, `feedback_restart_coordination`.
+
 New Frappe app (v0.1.0). Bridges ERPNext `Item` records into a Meta Commerce Catalog so the same product list serves WhatsApp Business Catalog messages, Facebook Shop, and Instagram Shopping — without running a parallel WooCommerce stack.
 
 Status: **scaffolded + installed on lab, not yet wired to a real Meta Catalog on prod.** See [`muelle-host/AGENTS.md`](../AGENTS.md) for the broader stack map.
