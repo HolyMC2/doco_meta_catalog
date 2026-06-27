@@ -52,19 +52,16 @@ def _canon_phone(p: str) -> str:
 
 
 def _claim_order(msg_id: str) -> bool:
-    """Atomically claim a WhatsApp order message id via the Meta Order Log UNIQUE index. Returns
-    True when newly claimed, False when already ingested. Two concurrent Meta retries race on the
-    insert — exactly one wins; the loser hits the duplicate and gets False. Replaces a db.exists()
-    TOCTOU that both racers could pass before either committed."""
+    """Insert the dedup row for this WhatsApp order id INSIDE the caller's OPEN transaction — NO
+    commit here. The caller commits the claim + the Sales Order TOGETHER, so a failure between them
+    rolls BOTH back (no orphan claim that would make a retry silently drop a real order). Concurrent
+    retries race on the UNIQUE index — exactly one wins; the loser gets the duplicate and returns
+    False. Returns True when newly claimed."""
     try:
         frappe.get_doc({"doctype": "Meta Order Log", "wa_msg_id": msg_id}).insert(ignore_permissions=True)
-        frappe.db.commit()
         return True
-    except Exception:
-        frappe.db.rollback()
-        if frappe.db.exists("Meta Order Log", {"wa_msg_id": msg_id}):
-            return False
-        raise
+    except frappe.DuplicateEntryError:
+        return False
 
 
 def _outgoing_account():
@@ -185,32 +182,55 @@ def send_product_list(
     return _post_message(acct, payload)
 
 
+@frappe.whitelist()
+def send_cta_url(to: str, body: str, url: str, button_text: str = "Pagar", footer: str | None = None):
+    """Interactive CTA-URL button — e.g. push the Mercado Pago checkout link (MX has no native Meta
+    checkout, so the sale completes off-Meta). Free inside the 24h window. Role/rate/E.164-gated like
+    the catalog senders. [roadmap MA-2]"""
+    _guard_send(to)
+    acct = _outgoing_account()
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "interactive",
+        "interactive": {
+            "type": "cta_url",
+            "body": {"text": (body or " ")[:1024]},
+            "action": {"name": "cta_url", "parameters": {"display_text": (button_text or "Pagar")[:20], "url": url}},
+        },
+    }
+    if footer:
+        payload["interactive"]["footer"] = {"text": footer[:60]}
+    return _post_message(acct, payload)
+
+
 # ---------------- inbound cart / order (security-critical) ----------------
 #
-# REACHABILITY CONTRACT: this builds a Sales Order + Customer with ignore_permissions, so it must
-# run ONLY behind the HMAC-verified webhook (doco_meta_catalog.webhook.webhook), which proves the
-# payload came from Meta. It is intentionally NOT @frappe.whitelist and asserts signature_verified
-# before any write. The cart is composed by the buyer (attacker-influenceable), so EVERY field is
-# re-derived server-side: prices from Item Price (NEVER the payload `item_price`), the sellable set
-# from the catalog gate (publish_on_web), bounded qty/line counts, idempotency on the WhatsApp
-# message id, and the SO stays a DRAFT (no GL/stock impact until a human submits).
+# REACHABILITY CONTRACT: builds a Sales Order + Customer with ignore_permissions, so it must run
+# ONLY from the trusted inbound path — the `WhatsApp Message` after_insert doc-event in
+# doco_meta_catalog.inbound (frappe_whatsapp already received + persisted the inbound order on the
+# WABA webhook it owns). It is NOT @frappe.whitelist and refuses to run unless the caller passes
+# trusted=True. There is NO Meta HMAC here (frappe_whatsapp's webhook is unsigned), so the blast
+# radius of a forged order is bounded structurally instead: EVERY field is re-derived server-side
+# (prices from Item Price, NEVER the buyer `item_price`; sellable set from the publish_on_web gate;
+# bounded qty/line counts), the message id is deduped, and the SO is a DRAFT (no GL/stock impact
+# until a human reviews + submits). Runs ASYNC (enqueued) off the webhook request path.
 
 
 def handle_order_message(
     message: dict,
     whatsapp_account_name: str | None = None,
-    signature_verified: bool = False,
+    trusted: bool = False,
 ) -> str | None:
     """Build a DRAFT Sales Order from a Meta `order` (WhatsApp cart) message. Returns the SO name,
-    or None when nothing sellable / already ingested / malformed. Raises if the caller did not
-    verify the webhook signature.
+    or None when nothing sellable / already ingested / malformed. Raises if `trusted` is not set.
 
     Meta `order` payload: {"text": "...", "product_items": [{"product_retailer_id", "quantity",
     "item_price", "currency"}, ...]}. `item_price` is buyer-supplied and is IGNORED — we re-price.
     """
-    if not signature_verified:
-        # defense in depth: never construct an order from an unverified (possibly forged) payload
-        frappe.throw("handle_order_message requires a signature-verified webhook")
+    if not trusted:
+        # defense in depth: only the inbound doc-event path may build orders
+        frappe.throw("handle_order_message must be called from the trusted inbound path")
 
     order = message.get("order") or {}
     items = order.get("product_items") or []
@@ -224,19 +244,13 @@ def handle_order_message(
     msg_id = str(message.get("id") or "")[:120]
     if not msg_id:
         return None  # no WhatsApp message id → cannot dedup; real Meta orders always carry one
-    # atomic idempotency: claim the message id via a UNIQUE index (see _claim_order). Dup → done.
-    if not _claim_order(msg_id):
-        return None
-    po_no = f"WA-{msg_id}"
 
-    items = items[: _sf._MAX_LINES]  # bound line count before any per-item work
-
-    # sellable gate + server-side re-pricing — the buyer's `item_price` is NEVER trusted
+    # build the priced, sellable lines FIRST (reads only — safe to recompute on a retry) so that an
+    # order with nothing sellable never claims a dedup row and never creates a Customer/SO.
+    items = items[: _sf._MAX_LINES]
     codes = [pi.get("product_retailer_id") for pi in items if pi.get("product_retailer_id")]
     eligible = {it["name"] for it in sync._eligible_leaves(codes)}  # publish_on_web, leaf
     prices = _sf._prices(list(eligible), _sf._selling_price_list())
-
-    # accumulate qty per SKU so duplicate cart lines can't multiply the per-SKU cap
     agg: dict[str, int] = {}
     for pi in items:
         code = pi.get("product_retailer_id")
@@ -249,37 +263,41 @@ def handle_order_message(
         if qty < 1:
             continue
         agg[code] = agg.get(code, 0) + qty
-
     if not agg:
-        return None  # nothing sellable → create NO customer and NO order (no spam)
-
+        return None  # nothing sellable → no claim, no Customer, no SO
     lines = [
         {"item_code": code, "qty": min(qty, _sf._MAX_QTY), "rate": flt(prices[code])}
         for code, qty in agg.items()
     ]
 
-    # resolve/create the customer only now (avoids empty-order Customer spam)
-    contact_name = None
+    # ATOMIC claim + SO: insert the dedup row (no commit) then the SO, and commit ONCE. A failure
+    # anywhere in here rolls BOTH back, so a retry re-creates the order — never an orphan claim that
+    # would make the retry drop a real order. Concurrent retries race on the UNIQUE index.
+    if not _claim_order(msg_id):
+        return None  # already ingested
     try:
-        from crm.integrations.api import get_contact_by_phone_number
-        contact_name = (get_contact_by_phone_number(from_number) or {}).get("name")
+        contact_name = None
+        try:
+            from crm.integrations.api import get_contact_by_phone_number
+            contact_name = (get_contact_by_phone_number(from_number) or {}).get("name")
+        except Exception:
+            pass
+        customer = _find_or_create_customer(from_number, contact_name)
+        delivery = frappe.utils.add_days(frappe.utils.today(), 1)
+        so = frappe.new_doc("Sales Order")
+        so.customer = customer
+        so.transaction_date = frappe.utils.today()
+        so.delivery_date = delivery
+        so.docstatus = 0  # DRAFT — human reviews + submits
+        so.po_no = f"WA-{msg_id}"
+        for ln in lines:
+            so.append("items", {**ln, "delivery_date": delivery})
+        so.insert(ignore_permissions=True)
+        frappe.db.set_value("Meta Order Log", {"wa_msg_id": msg_id}, "sales_order", so.name, update_modified=False)
+        frappe.db.commit()  # claim + SO committed together
     except Exception:
-        pass
-    customer = _find_or_create_customer(from_number, contact_name)
-
-    delivery = frappe.utils.add_days(frappe.utils.today(), 1)
-    so = frappe.new_doc("Sales Order")
-    so.customer = customer
-    so.transaction_date = frappe.utils.today()
-    so.delivery_date = delivery
-    so.docstatus = 0  # DRAFT — human reviews + submits; no GL/stock impact unattended
-    if po_no:
-        so.po_no = po_no
-    for ln in lines:
-        so.append("items", {**ln, "delivery_date": delivery})
-    so.insert(ignore_permissions=True)
-    frappe.db.commit()
-    frappe.db.set_value("Meta Order Log", {"wa_msg_id": msg_id}, "sales_order", so.name, update_modified=False)
+        frappe.db.rollback()  # drop the claim too → a retry re-processes the real order
+        raise
 
     note = (order.get("text") or "").strip()
     if note:

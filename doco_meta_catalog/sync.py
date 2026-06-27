@@ -281,7 +281,40 @@ def _post_items_batch(settings, requests_payload):
             message=f"meta_error={meta_err}\nitems={len(requests_payload)} sample={json.dumps(requests_payload[:1])[:800]}",
         )
         r.raise_for_status()
-    return r.json()
+    resp = r.json()
+    # items_batch returns 200 even when Meta rejects INDIVIDUAL items (bad price/image/title/
+    # currency) — surface them so "why isn't product X on Facebook" is debuggable.
+    errs = [
+        {"id": v.get("retailer_id"), "errors": v.get("errors")}
+        for v in (resp.get("validation_status") or [])
+        if v.get("errors")
+    ]
+    if errs:
+        frappe.log_error(title="Meta Catalog item rejections", message=json.dumps(errs[:25])[:2000])
+    return resp
+
+
+def _count_rejections(resp) -> int:
+    try:
+        return sum(1 for v in (resp or {}).get("validation_status", []) if v.get("errors"))
+    except Exception:
+        return 0
+
+
+def _catalog_product_count(settings):
+    """The catalog's CURRENT product_count, or None on error. items_batch 200 != ingested: the
+    unverified-business item cap silently drops the overflow with no per-item error, so a reconcile
+    that 'sent 2302' can leave only 1000 in the catalog with a falsely-green status."""
+    try:
+        r = requests.get(
+            f"{settings.get_graph_root()}/{settings.catalog_id}",
+            params={"fields": "product_count", "access_token": settings.get_token()},
+            timeout=30,
+        )
+        pc = (r.json() or {}).get("product_count") if r.ok else None
+        return int(pc) if pc is not None else None
+    except Exception:
+        return None
 
 
 # ---------------- doc-event hooks ----------------
@@ -343,22 +376,37 @@ def full_reconcile():
         return
     reqs, skipped = _build_payloads(None, s)
     sent = 0
+    rejected = 0
     try:
         for i in range(0, len(reqs), _BATCH_CHUNK):
             chunk = reqs[i : i + _BATCH_CHUNK]
-            _post_items_batch(s, chunk)
+            resp = _post_items_batch(s, chunk)
             sent += len(chunk)
+            rejected += _count_rejections(resp)
     except Exception as e:
         frappe.db.set_value(
             SETTINGS_DOCTYPE, SETTINGS_DOCTYPE, "last_error", str(e)[:500], update_modified=False
         )
         raise
+    # PARITY CHECK: items_batch 200 = "accepted", not "ingested". Read the catalog back so a silent
+    # item cap or async rejection that drops items is reported instead of a falsely-green status.
+    in_catalog = _catalog_product_count(s)
+    drift = (sent - in_catalog) if in_catalog is not None else None
+    if rejected or (drift is not None and drift > 0):
+        status = f"WARN: {sent} sent, {in_catalog} in catalog"
+        if rejected:
+            status += f", {rejected} item errors"
+        if drift and drift > 0:
+            status += f", {drift} NOT ingested (likely unverified-business cap / async rejects)"
+        frappe.log_error(title="Meta Catalog reconcile drift", message=status)
+    else:
+        status = f"OK ({sent} sent, {len(skipped)} skipped, {in_catalog} in catalog)"
     frappe.db.set_value(
         SETTINGS_DOCTYPE,
         SETTINGS_DOCTYPE,
         {
             "last_full_reconcile": frappe.utils.now(),
-            "last_full_reconcile_status": f"OK ({sent} sent, {len(skipped)} skipped)",
+            "last_full_reconcile_status": status[:140],
             "last_error": "",
         },
         update_modified=False,

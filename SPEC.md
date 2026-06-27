@@ -56,15 +56,20 @@ skipped (same as the storefront would refuse to sell).
 `send_catalog_message` / `send_product_message` / `send_product_list` → WhatsApp Cloud API
 interactive messages referencing `catalog_id` + `product_retailer_id`. **Role-gated** (§5).
 
-### C. Inbound cart → Sales Order — `wa_helpers.handle_order_message` — **NOT wired (security-gated, §5)**
+### C. Inbound cart → Sales Order — **ASYNC doc-event pickoff** (`inbound.py` + `handle_order_message`)
 ```
-buyer taps catalog product ─▶ WA cart message ─▶ Meta webhook
+buyer taps catalog product ─▶ WA cart message ─▶ Meta webhook (owned by frappe_whatsapp, unchanged)
   ─▶ frappe_whatsapp persists WhatsApp Message (content_type='order', product_catalog_json)
-  ─▶ [NEW] connector HMAC-verified endpoint  (X-Hub-Signature-256, fail-closed)
-  ─▶ handle_order_message: re-price from Item Price · sellable gate · caps · idempotency
-  ─▶ DRAFT Sales Order ─▶ human reviews + sends payment link (MX off-Meta) ─▶ submit
+  ─▶ [doco_meta_catalog] WhatsApp Message after_insert ─▶ enqueue process_order  (background, RQ)
+  ─▶ handle_order_message(trusted): re-price from Item Price · publish_on_web gate · caps ·
+     ATOMIC claim+SO (Meta Order Log UNIQUE) ─▶ DRAFT Sales Order ─▶ human reviews + sends MP link
 ```
-MX has no native Meta checkout → the sale completes off-Meta (Mercado Pago Checkout Pro link).
+**We do NOT front Meta's webhook** (the audit rejected that — it made one custom endpoint the sole
+inbound path for ALL WhatsApp = SPOF + silent-loss). frappe_whatsapp keeps owning the inbox; we only
+react to persisted order rows, off the request path. No Meta HMAC here (frappe_whatsapp's webhook is
+unsigned) — the forged-order blast radius is bounded structurally (server re-price + sellable gate +
+caps + dedup + DRAFT-only). MX has no native Meta checkout → sale completes off-Meta (MP link). The
+deleted `webhook.py` (HMAC-fronting) is in git history if a signed-edge deployment is ever wanted.
 
 ---
 

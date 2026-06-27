@@ -1,50 +1,63 @@
-"""Tests for the inbound trust boundary: HMAC signature verification + hardened order→SO.
+"""Tests for inbound WhatsApp order -> draft Sales Order.
 
-Pure logic tests — frappe doc writes, the sellable-leaf gate, and the price source are mocked,
-so these assert ONLY the security-critical behaviour: a bad/missing signature is rejected, an
-unverified caller cannot build an order, and every order line is re-priced from Item Price (never
-the buyer payload), gated to sellable items, qty/line bounded, idempotent, and left as a DRAFT.
+Two parts: (1) the async pickoff (doco_meta_catalog.inbound) — only INBOUND `order` rows enqueue,
+and the worker rebuilds the Meta payload + calls the handler trusted; (2) handle_order_message —
+server re-pricing (never the buyer price), publish_on_web sellable gate, qty/line caps, atomic
+claim+SO idempotency, phone canon, DRAFT-only. Frappe writes + storefront helpers are mocked.
 """
 
-import hashlib
-import hmac
 import unittest
 from unittest.mock import patch
 
-import frappe
-
-from doco_meta_catalog import wa_helpers, webhook
+from doco_meta_catalog import inbound, wa_helpers
 
 
-class TestVerifySignature(unittest.TestCase):
-    def _sig(self, secret, body):
-        return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+# ---------------- async pickoff ----------------
 
-    def test_valid(self):
-        body = b'{"a":1}'
-        self.assertTrue(webhook.verify_signature(body, self._sig("s3cr3t", body), "s3cr3t"))
 
-    def test_tampered_body_rejected(self):
-        sig = self._sig("s3cr3t", b'{"a":1}')
-        self.assertFalse(webhook.verify_signature(b'{"a":2}', sig, "s3cr3t"))
+class _Doc:
+    def __init__(self, **kw):
+        self._d = kw
+        self.name = kw.get("name", "WM-1")
 
-    def test_wrong_secret_rejected(self):
-        body = b'{"a":1}'
-        self.assertFalse(webhook.verify_signature(body, self._sig("other", body), "s3cr3t"))
+    def get(self, k):
+        return self._d.get(k)
 
-    def test_missing_header_rejected(self):
-        self.assertFalse(webhook.verify_signature(b"x", None, "s"))
 
-    def test_missing_secret_rejected(self):
-        self.assertFalse(webhook.verify_signature(b"x", "sha256=abc", None))
+class TestInboundPickoff(unittest.TestCase):
+    def test_enqueues_for_incoming_order(self):
+        with patch.object(inbound.frappe, "enqueue") as eq:
+            inbound.on_whatsapp_message(_Doc(content_type="order", type="Incoming"))
+            eq.assert_called_once()
 
-    def test_bad_prefix_rejected(self):
-        self.assertFalse(webhook.verify_signature(b"x", "abc", "s"))
+    def test_skips_non_order(self):
+        with patch.object(inbound.frappe, "enqueue") as eq:
+            inbound.on_whatsapp_message(_Doc(content_type="text", type="Incoming"))
+            eq.assert_not_called()
 
-    def test_non_ascii_or_nonhex_header_rejected(self):
-        # must return False (never raise TypeError → 500) on a non-hex / non-ASCII digest
-        self.assertFalse(webhook.verify_signature(b"x", "sha256=Ã" + "a" * 62, "s"))
-        self.assertFalse(webhook.verify_signature(b"x", "sha256=" + "z" * 64, "s"))
+    def test_skips_outgoing_echo(self):
+        with patch.object(inbound.frappe, "enqueue") as eq:
+            inbound.on_whatsapp_message(_Doc(content_type="order", type="Outgoing"))
+            eq.assert_not_called()
+
+    def test_process_order_builds_payload_and_calls_handler_trusted(self):
+        row = {
+            "content_type": "order",
+            "message_id": "wamid.Z",
+            "from": "+5216691234567",
+            "product_catalog_json": '{"product_items":[{"product_retailer_id":"A","quantity":1}],"text":"hola"}',
+        }
+        with patch.object(inbound.frappe, "set_user"), \
+             patch.object(inbound.frappe.db, "get_value", return_value=row), \
+             patch.object(wa_helpers, "handle_order_message") as h:
+            inbound.process_order("WM-1")
+            args, kw = h.call_args
+            self.assertTrue(kw.get("trusted"))
+            self.assertEqual(args[0]["id"], "wamid.Z")
+            self.assertEqual(args[0]["order"]["product_items"][0]["product_retailer_id"], "A")
+
+
+# ---------------- order -> SO ----------------
 
 
 def _order_msg(items, frm="+5216691234567", mid="wamid.X", text=None):
@@ -71,7 +84,7 @@ class FakeSO:
 
 
 class TestHandleOrder(unittest.TestCase):
-    def _run(self, msg, eligible, prices, dup=False, verified=True):
+    def _run(self, msg, eligible, prices, dup=False, trusted=True):
         fake = FakeSO()
         with patch.object(wa_helpers.sync, "_eligible_leaves", return_value=[{"name": c} for c in eligible]), \
              patch.object(wa_helpers._sf, "_selling_price_list", return_value="PL"), \
@@ -79,16 +92,17 @@ class TestHandleOrder(unittest.TestCase):
              patch.object(wa_helpers, "_find_or_create_customer", return_value="CUST-1") as fc, \
              patch.object(wa_helpers, "_claim_order", return_value=(not dup)), \
              patch.object(wa_helpers.frappe.db, "commit"), \
+             patch.object(wa_helpers.frappe.db, "rollback"), \
              patch.object(wa_helpers.frappe.db, "set_value"), \
              patch.object(wa_helpers.frappe, "new_doc", return_value=fake):
-            res = wa_helpers.handle_order_message(msg, "Acct", signature_verified=verified)
+            res = wa_helpers.handle_order_message(msg, "Acct", trusted=trusted)
         return res, fake, fc
 
-    def test_unverified_raises(self):
+    def test_untrusted_raises(self):
         with self.assertRaises(Exception):
             wa_helpers.handle_order_message(
                 _order_msg([{"product_retailer_id": "A", "quantity": 1, "item_price": 1}]),
-                signature_verified=False,
+                trusted=False,
             )
 
     def test_reprice_ignores_payload_price(self):
@@ -148,7 +162,6 @@ class TestHandleOrder(unittest.TestCase):
         fc.assert_not_called()
 
     def test_duplicate_lines_merged_and_capped(self):
-        # same SKU twice; the SUMMED qty is what gets capped at _MAX_QTY (999)
         msg = _order_msg([
             {"product_retailer_id": "A", "quantity": 600},
             {"product_retailer_id": "A", "quantity": 600},
@@ -164,11 +177,6 @@ class TestHandleOrder(unittest.TestCase):
         ])
         _, fake, _ = self._run(msg, eligible=["A", "B"], prices={"A": 10.0, "B": 5.0})
         self.assertEqual([i["item_code"] for i in fake.items], ["B"])  # bad line dropped, order survives
-
-
-# NOTE: the webhook() HTTP entry is exercised LIVE (signed payload → 200, forged → 403), since
-# frappe.request is a bound LocalProxy that does not mock cleanly in a unit test. The trust
-# boundary is unit-covered by TestVerifySignature (the HMAC logic) above.
 
 
 if __name__ == "__main__":

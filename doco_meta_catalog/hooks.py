@@ -13,6 +13,11 @@ doc_events = {
         "on_update": "doco_meta_catalog.sync.queue_item_sync",
         "on_trash":  "doco_meta_catalog.sync.queue_item_delete",
     },
+    # Inbound WhatsApp cart -> draft Sales Order, picked off async (frappe_whatsapp owns the WABA
+    # webhook + persists order rows). NOT a fronting webhook — see inbound.py.
+    "WhatsApp Message": {
+        "after_insert": "doco_meta_catalog.inbound.on_whatsapp_message",
+    },
 }
 
 scheduler_events = {
