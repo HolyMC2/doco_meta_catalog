@@ -31,7 +31,7 @@ import re
 
 import frappe
 import requests
-from frappe.utils import flt, get_url, strip_html_tags
+from frappe.utils import flt, get_url, strip_html_tags, today
 
 # The storefront module is the SINGLE SOURCE OF TRUTH for what is published, its real
 # selling price, live stock, and which images are safe to expose to an anonymous caller.
@@ -198,6 +198,13 @@ def _build_payloads(item_codes: list[str] | None, settings) -> tuple[list[dict],
     price_list = sf._selling_price_list()
     prices = sf._prices(names, price_list)
     levels = sf._stock_levels(names)  # 'out' | 'low' | 'in'; services always 'in'
+    # MA-5: sale price = the EXACT auto-Pricing-Rule discount the storefront shows /
+    # checkout charges (sf._sale_prices), so catalog promos == shop promos. Cheap no-op
+    # ({}) when no active sale rules. effective_date lets Meta self-expire the promo
+    # between syncs; the daily reconcile is the backstop.
+    prof = sf._profile()
+    sale_rates = sf._sale_prices(names, prices, prof)
+    sale_window = _sale_window() if sale_rates else None
     overrides = _group_overrides(settings)
     # Default 0 → Meta price == the exact shop price (parity). A shop may opt into a markup.
     markup = 1 + flt(settings.price_markup_percent) / 100.0
@@ -252,8 +259,45 @@ def _build_payloads(item_codes: list[str] | None, settings) -> tuple[list[dict],
             data["color"] = vm["color"]  # Meta variant option
         if ov.get("google_product_category"):
             data["google_product_category"] = ov["google_product_category"]
+        # MA-5: discounted price (struck-through original kept as `price`). markup applied
+        # to both so sale_price < price holds. effective_date only when bounded.
+        sr = sale_rates.get(code)
+        if sr:
+            data["sale_price"] = _format_price(flt(sr) * markup, currency)
+            if sale_window:
+                data["sale_price_effective_date"] = sale_window
         reqs.append({"method": "UPDATE", "data": data})
     return reqs, skipped
+
+
+def _sale_window() -> str | None:
+    """ISO8601 interval for Meta ``sale_price_effective_date``, derived from the
+    active price-discount selling Pricing Rules' date bounds (MX/CST, -06:00).
+
+    Returns None when ANY active sale rule is open-ended (no valid_upto) — then we
+    omit the field and let the sale stand until the next sync clears it. The window
+    is shop-level (min start .. max end); for the common single-promo case it is
+    exact, and the daily reconcile corrects any multi-rule drift."""
+    td = today()
+    starts: list[str] = []
+    ends: list[str] = []
+    for r in frappe.get_all(
+        "Pricing Rule",
+        filters={"selling": 1, "disable": 0, "coupon_code_based": 0, "price_or_product_discount": "Price"},
+        fields=["valid_from", "valid_upto"], limit=50,
+    ):
+        vf, vu = r.get("valid_from"), r.get("valid_upto")
+        if vf and str(vf) > td:
+            continue  # not started
+        if vu and str(vu) < td:
+            continue  # already ended
+        starts.append(str(vf) if vf else td)
+        if not vu:
+            return None  # an open-ended active rule → don't constrain the window
+        ends.append(str(vu))
+    if not ends:
+        return None
+    return f"{min(starts)}T00:00:00-06:00/{max(ends)}T23:59:59-06:00"
 
 
 # ---------------- Meta transport ----------------
