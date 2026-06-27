@@ -51,6 +51,22 @@ def _canon_phone(p: str) -> str:
     return ("+" + d) if d else ""
 
 
+def _claim_order(msg_id: str) -> bool:
+    """Atomically claim a WhatsApp order message id via the Meta Order Log UNIQUE index. Returns
+    True when newly claimed, False when already ingested. Two concurrent Meta retries race on the
+    insert — exactly one wins; the loser hits the duplicate and gets False. Replaces a db.exists()
+    TOCTOU that both racers could pass before either committed."""
+    try:
+        frappe.get_doc({"doctype": "Meta Order Log", "wa_msg_id": msg_id}).insert(ignore_permissions=True)
+        frappe.db.commit()
+        return True
+    except Exception:
+        frappe.db.rollback()
+        if frappe.db.exists("Meta Order Log", {"wa_msg_id": msg_id}):
+            return False
+        raise
+
+
 def _outgoing_account():
     """Pick the WhatsApp Account that sends product messages."""
     s = frappe.get_cached_doc("Meta Catalog Settings")
@@ -208,17 +224,9 @@ def handle_order_message(
     msg_id = str(message.get("id") or "")[:120]
     if not msg_id:
         return None  # no WhatsApp message id → cannot dedup; real Meta orders always carry one
-    # atomic idempotency: CLAIM the message id via a UNIQUE index. Two concurrent Meta retries
-    # race here — exactly one insert wins; the loser sees the duplicate and stops. Replaces a
-    # db.exists() TOCTOU that both racers could pass before either committed.
-    try:
-        frappe.get_doc({"doctype": "Meta Order Log", "wa_msg_id": msg_id}).insert(ignore_permissions=True)
-        frappe.db.commit()
-    except Exception:
-        frappe.db.rollback()
-        if frappe.db.exists("Meta Order Log", {"wa_msg_id": msg_id}):
-            return None  # already ingested
-        raise
+    # atomic idempotency: claim the message id via a UNIQUE index (see _claim_order). Dup → done.
+    if not _claim_order(msg_id):
+        return None
     po_no = f"WA-{msg_id}"
 
     items = items[: _sf._MAX_LINES]  # bound line count before any per-item work

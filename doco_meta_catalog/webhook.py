@@ -61,22 +61,27 @@ def webhook():
         # FAIL CLOSED before any parse / DB write / delegation — store nothing on a bad signature.
         frappe.throw("Invalid webhook signature", frappe.PermissionError)
 
-    # create draft Sales Orders from order messages FIRST — independent + self-guarded + commits
-    # per order, so a later frappe_whatsapp failure cannot lose them (Meta retry is idempotent).
-    _process_orders(raw)
-
-    # then run frappe_whatsapp's normal inbox processing. Do NOT swallow its errors into a 200:
-    # Meta retries only on non-2xx, so a swallowed failure = permanent silent message loss.
-    from frappe_whatsapp.utils import webhook as fw
-
+    # HMAC-authenticated → process as Administrator. The request runs as Guest, but both our order
+    # reads (Item / Item Price) and frappe_whatsapp's post() (inserts ignore_permissions, but some
+    # reads use the session user) need privileges. Isolate the delegate's errors and ALWAYS return
+    # 200: this is the LIVE shared WhatsApp callback, and a non-2xx would make Meta retry then
+    # DISABLE it. Orders are committed idempotently in _process_orders, so a delegate hiccup that we
+    # swallow cannot lose them (the error is logged, not silent).
+    _user = frappe.session.user
     try:
-        fw.post()
-    except Exception:
-        frappe.log_error(
-            title="meta catalog webhook: frappe_whatsapp delegate failed (returning 500 → Meta retries)",
-            message=frappe.get_traceback(),
-        )
-        raise
+        frappe.set_user("Administrator")
+        _process_orders(raw)  # draft Sales Orders from order messages (independent + self-guarded)
+        from frappe_whatsapp.utils import webhook as fw
+
+        try:
+            fw.post()  # frappe_whatsapp's normal inbox/status processing — behaviour unchanged
+        except Exception:
+            frappe.log_error(
+                title="meta catalog webhook: frappe_whatsapp delegate error (logged, returning 200)",
+                message=frappe.get_traceback(),
+            )
+    finally:
+        frappe.set_user(_user)
     return "ok"
 
 
