@@ -1,0 +1,91 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-06-27 23:55:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "retailer_id",
+  "review_status",
+  "checked_at",
+  "column_break_1",
+  "fb_status",
+  "ig_status",
+  "wa_status",
+  "errors"
+ ],
+ "fields": [
+  {
+   "fieldname": "retailer_id",
+   "fieldtype": "Data",
+   "label": "Retailer ID (Item Code)",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "review_status",
+   "fieldtype": "Data",
+   "label": "Review Status",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "checked_at",
+   "fieldtype": "Datetime",
+   "label": "Checked At",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "fb_status",
+   "fieldtype": "Data",
+   "label": "FB Shops"
+  },
+  {
+   "fieldname": "ig_status",
+   "fieldtype": "Data",
+   "label": "Instagram"
+  },
+  {
+   "fieldname": "wa_status",
+   "fieldtype": "Data",
+   "label": "WhatsApp",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "errors",
+   "fieldtype": "Small Text",
+   "label": "Errors"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-06-27 23:55:00.000000",
+ "modified_by": "Administrator",
+ "module": "Doco Meta Catalog",
+ "name": "Meta Catalog Diagnostic",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}
