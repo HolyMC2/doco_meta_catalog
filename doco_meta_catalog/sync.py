@@ -252,6 +252,8 @@ def _build_payloads(item_codes: list[str] | None, settings) -> tuple[list[dict],
             "image_link": img,
             "brand": it.get("brand") or settings.default_brand or "",
             "visibility": ov.get("visibility") or default_visibility,
+            # MA-9: item_group as product_type so Meta Product Sets can auto-curate by group.
+            "product_type": it.get("item_group") or "",
         }
         if group_id:
             data["item_group_id"] = group_id  # group a template's variants (per model when configured)

@@ -1,0 +1,97 @@
+{
+ "actions": [],
+ "autoname": "field:set_name",
+ "creation": "2026-06-27 23:55:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "set_name",
+  "dimension",
+  "value",
+  "enabled",
+  "column_break_1",
+  "meta_set_id",
+  "last_synced",
+  "last_error"
+ ],
+ "fields": [
+  {
+   "fieldname": "set_name",
+   "fieldtype": "Data",
+   "label": "Set Name",
+   "in_list_view": 1,
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "dimension",
+   "fieldtype": "Select",
+   "label": "Dimension",
+   "options": "item_group\nbrand\navailability\nmanual",
+   "in_list_view": 1,
+   "reqd": 1,
+   "description": "item_group -> filters product_type; brand -> filters brand; availability -> filters availability; manual -> Value is a raw Meta filter JSON."
+  },
+  {
+   "fieldname": "value",
+   "fieldtype": "Data",
+   "label": "Value",
+   "in_list_view": 1,
+   "description": "Group name / brand / availability ('in stock'), or a raw filter JSON for the manual dimension."
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "meta_set_id",
+   "fieldtype": "Data",
+   "label": "Meta Product Set ID",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_synced",
+   "fieldtype": "Datetime",
+   "label": "Last Synced",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_error",
+   "fieldtype": "Small Text",
+   "label": "Last Error",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-06-27 23:55:00.000000",
+ "modified_by": "Administrator",
+ "module": "Doco Meta Catalog",
+ "name": "Meta Product Set",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
