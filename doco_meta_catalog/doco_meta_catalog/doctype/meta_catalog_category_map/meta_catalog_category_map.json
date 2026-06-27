@@ -6,6 +6,8 @@
  "engine": "InnoDB",
  "field_order": [
   "item_group",
+  "exclude",
+  "visibility",
   "condition",
   "google_product_category"
  ],
@@ -17,7 +19,25 @@
    "label": "Item Group",
    "options": "Item Group",
    "reqd": 1,
-   "columns": 4
+   "columns": 3
+  },
+  {
+   "default": "0",
+   "fieldname": "exclude",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Exclude",
+   "columns": 1,
+   "description": "Skip items in this group entirely (negotiable / message-for-price items you promote with custom WhatsApp messages instead)."
+  },
+  {
+   "fieldname": "visibility",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Visibility",
+   "options": "\nstaging\npublished",
+   "columns": 2,
+   "description": "Override the default visibility for this group. Blank = use the Settings default."
   },
   {
    "fieldname": "condition",

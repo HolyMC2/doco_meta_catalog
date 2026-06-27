@@ -102,6 +102,25 @@ that a human must submit before any GL/stock impact.
 | HIGH | No `X-Hub-Signature-256` HMAC on inbound webhook — any host forges `order`/`text`/status | `frappe_whatsapp/utils/webhook.py` (image-baked) | NEW connector guest endpoint: read raw body → recompute HMAC → `compare_digest` → 403 fail-closed → delegate. Point Meta webhook at it. Reuse `frappe_whatsapp/api/flow_endpoint.py:140` pattern | **batch 2 — before inbound wiring** |
 | HIGH | `handle_order_message` builds SO + Customer with `ignore_permissions` — unauth SO-creation primitive the moment it's wired | `wa_helpers.py:134` | keep un-whitelisted, reachable ONLY behind the HMAC gate; re-price from Item Price (never trust payload `item_price`); sellable gate (`publish_on_web`); caps (qty>0 ≤ `_MAX_QTY`, line count); E.164 `from`; idempotency on WA message id; stay DRAFT | **batch 2 — before inbound wiring** |
 
+### Batch 2 status (built, lab-tested, NOT wired) + go-live gate
+
+Batch 2 (HMAC endpoint + hardened order→SO) is implemented and passed an adversarial review — no
+auth/forgery bypass; HMAC over raw bytes, fail-closed 403 before any write; order→SO is draft-only.
+Applied from the review: variant-template eligibility gate (also fixes the live push), duplicate-
+line merge + summed-qty cap, Infinity-safe qty, non-ASCII signature header → 403 (not 500), blank
+msg-id reject, and the webhook no longer swallows a frappe_whatsapp failure into a 200 (Meta retries
+instead of silent message loss). 37 unit tests.
+
+**MUST land before repointing the Meta webhook URL** (go-live gate — inbound stays unwired until then):
+- **Atomic idempotency** — replace the `db.exists(po_no)` TOCTOU with DB-enforced uniqueness (a
+  dedup doctype with a UNIQUE WhatsApp message id, insert-first) so concurrent Meta retries cannot
+  create duplicate draft Sales Orders.
+- **Storefront Profile `hidden_items`** — thread the authoritative profile's hidden set into both the
+  push gate and the order gate (add a `storefront` link to Meta Catalog Settings to pick the profile).
+- **Phone canonicalization** in `_find_or_create_customer` (match crm normalization) to avoid forking
+  duplicate Customers.
+- **End-to-end webhook tests** — tampered-body POST → 403 + zero rows written; concurrent duplicate delivery.
+
 Identifiers `catalog_id`/`phone_id` are Meta business IDs (not secrets). The bearer **token** is a
 secret (Password field, never logged — confirmed). `app_secret` likewise.
 

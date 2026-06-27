@@ -23,6 +23,11 @@ import requests
 # Reuse the storefront's per-IP + global rate limiter so a single compromised / low-priv
 # Desk session cannot blast the business WhatsApp number or burn the metered quota.
 from doco.docoutils import storefront as _sf
+from frappe.utils import escape_html, flt
+
+# sync provides the canonical "published, sellable leaf" gate reused to validate inbound order
+# lines against the same universe the catalog publishes.
+from doco_meta_catalog import sync
 
 _E164 = re.compile(r"^\+?\d{8,15}$")
 _SEND_ROLES = ["System Manager", "Sales User"]
@@ -157,67 +162,103 @@ def send_product_list(
     return _post_message(acct, payload)
 
 
-# ---------------- inbound cart / order ----------------
+# ---------------- inbound cart / order (security-critical) ----------------
+#
+# REACHABILITY CONTRACT: this builds a Sales Order + Customer with ignore_permissions, so it must
+# run ONLY behind the HMAC-verified webhook (doco_meta_catalog.webhook.webhook), which proves the
+# payload came from Meta. It is intentionally NOT @frappe.whitelist and asserts signature_verified
+# before any write. The cart is composed by the buyer (attacker-influenceable), so EVERY field is
+# re-derived server-side: prices from Item Price (NEVER the payload `item_price`), the sellable set
+# from the catalog gate (publish_on_web), bounded qty/line counts, idempotency on the WhatsApp
+# message id, and the SO stays a DRAFT (no GL/stock impact until a human submits).
 
 
-def handle_order_message(message: dict, whatsapp_account_name: str) -> str | None:
-    """Called from frappe_whatsapp webhook router when message_type == 'order'.
+def handle_order_message(
+    message: dict,
+    whatsapp_account_name: str | None = None,
+    signature_verified: bool = False,
+) -> str | None:
+    """Build a DRAFT Sales Order from a Meta `order` (WhatsApp cart) message. Returns the SO name,
+    or None when nothing sellable / already ingested / malformed. Raises if the caller did not
+    verify the webhook signature.
 
-    Meta `order` payload shape:
-        {
-            "catalog_id": "...",
-            "text": "optional buyer note",
-            "product_items": [
-                {"product_retailer_id": "IT-XYZ", "quantity": 1, "item_price": 19900, "currency": "MXN"},
-                ...
-            ]
-        }
-    Currency: minor units (19900 = 199.00 MXN).
-
-    Returns Sales Order docname, or None if dropping silently.
+    Meta `order` payload: {"text": "...", "product_items": [{"product_retailer_id", "quantity",
+    "item_price", "currency"}, ...]}. `item_price` is buyer-supplied and is IGNORED — we re-price.
     """
+    if not signature_verified:
+        # defense in depth: never construct an order from an unverified (possibly forged) payload
+        frappe.throw("handle_order_message requires a signature-verified webhook")
+
     order = message.get("order") or {}
     items = order.get("product_items") or []
     if not items:
         return None
 
-    from_number = message.get("from")
+    from_number = (message.get("from") or "").strip()
+    if not _E164.match(from_number):
+        return None  # malformed / forged sender
+
+    msg_id = str(message.get("id") or "")[:120]
+    if not msg_id:
+        return None  # no WhatsApp message id → cannot dedup; real Meta orders always carry one
+    po_no = f"WA-{msg_id}"
+    if frappe.db.exists("Sales Order", {"po_no": po_no}):
+        return None  # idempotent: this WhatsApp order was already ingested (sequential replay-safe)
+
+    items = items[: _sf._MAX_LINES]  # bound line count before any per-item work
+
+    # sellable gate + server-side re-pricing — the buyer's `item_price` is NEVER trusted
+    codes = [pi.get("product_retailer_id") for pi in items if pi.get("product_retailer_id")]
+    eligible = {it["name"] for it in sync._eligible_leaves(codes)}  # publish_on_web, leaf
+    prices = _sf._prices(list(eligible), _sf._selling_price_list())
+
+    # accumulate qty per SKU so duplicate cart lines can't multiply the per-SKU cap
+    agg: dict[str, int] = {}
+    for pi in items:
+        code = pi.get("product_retailer_id")
+        if code not in eligible or not prices.get(code):
+            continue  # not a published / priced / sellable item (forged, unknown, or unpriced)
+        try:
+            qty = int(pi.get("quantity") or 1)
+        except (TypeError, ValueError, OverflowError):
+            continue  # NaN / Infinity / garbage qty → skip this line, not the whole order
+        if qty < 1:
+            continue
+        agg[code] = agg.get(code, 0) + qty
+
+    if not agg:
+        return None  # nothing sellable → create NO customer and NO order (no spam)
+
+    lines = [
+        {"item_code": code, "qty": min(qty, _sf._MAX_QTY), "rate": flt(prices[code])}
+        for code, qty in agg.items()
+    ]
+
+    # resolve/create the customer only now (avoids empty-order Customer spam)
     contact_name = None
     try:
         from crm.integrations.api import get_contact_by_phone_number
-        c = get_contact_by_phone_number(from_number) or {}
-        contact_name = c.get("name")
+        contact_name = (get_contact_by_phone_number(from_number) or {}).get("name")
     except Exception:
         pass
-
     customer = _find_or_create_customer(from_number, contact_name)
+
+    delivery = frappe.utils.add_days(frappe.utils.today(), 1)
     so = frappe.new_doc("Sales Order")
     so.customer = customer
-    so.delivery_date = frappe.utils.add_days(frappe.utils.today(), 1)
     so.transaction_date = frappe.utils.today()
-    so.docstatus = 0  # draft
-    so.po_no = f"WA-{message.get('id','')[:24]}"
-
-    for pi in items:
-        if not frappe.db.exists("Item", pi.get("product_retailer_id")):
-            continue
-        so.append(
-            "items",
-            {
-                "item_code": pi["product_retailer_id"],
-                "qty": pi.get("quantity") or 1,
-                "rate": (pi.get("item_price") or 0) / 100.0,  # minor -> major units
-                "delivery_date": so.delivery_date,
-            },
-        )
-    if not so.items:
-        return None
+    so.delivery_date = delivery
+    so.docstatus = 0  # DRAFT — human reviews + submits; no GL/stock impact unattended
+    if po_no:
+        so.po_no = po_no
+    for ln in lines:
+        so.append("items", {**ln, "delivery_date": delivery})
     so.insert(ignore_permissions=True)
     frappe.db.commit()
 
-    note = order.get("text")
+    note = (order.get("text") or "").strip()
     if note:
-        so.add_comment("Comment", text=f"Buyer note via WhatsApp: {note}")
+        so.add_comment("Comment", text=f"Nota del comprador (WhatsApp): {escape_html(note)[:500]}")
     return so.name
 
 

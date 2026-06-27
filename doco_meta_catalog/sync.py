@@ -69,6 +69,8 @@ def _group_overrides(settings) -> dict:
         out[g] = {
             "condition": (row.get("condition") or "").strip() or None,
             "google_product_category": (row.get("google_product_category") or "").strip() or None,
+            "exclude": bool(row.get("exclude")),
+            "visibility": (row.get("visibility") or "").strip() or None,
         }
     return out
 
@@ -87,7 +89,21 @@ def _eligible_leaves(item_codes: list[str] | None = None) -> list[dict]:
         if not item_codes:
             return []
         filters["name"] = ["in", item_codes]
-    return frappe.get_all("Item", filters=filters, fields=_LEAF_FIELDS, limit_page_length=0)
+    leaves = frappe.get_all("Item", filters=filters, fields=_LEAF_FIELDS, limit_page_length=0)
+    # A variant inherits a COPY of publish_on_web from its template; if the template is later
+    # unpublished/disabled that copy can go stale. Mirror the storefront: a variant is sellable
+    # only while its TEMPLATE is published — keeps catalog == web shop and blocks orphaned variants.
+    templates = {l.get("variant_of") for l in leaves if l.get("variant_of")}
+    if templates:
+        live = set(
+            frappe.get_all(
+                "Item",
+                filters={"name": ["in", list(templates)], "publish_on_web": 1, "disabled": 0},
+                pluck="name",
+            )
+        )
+        leaves = [l for l in leaves if not l.get("variant_of") or l.get("variant_of") in live]
+    return leaves
 
 
 # ---------------- payload mapping ----------------
@@ -141,11 +157,17 @@ def _build_payloads(item_codes: list[str] | None, settings) -> tuple[list[dict],
     markup = 1 + flt(settings.price_markup_percent) / 100.0
     currency = settings.default_currency or "MXN"
     base_url = (settings.image_url_base or get_url()).rstrip("/")
+    # staging = synced to the catalog but NOT shown on public FB/IG (review-first); published = live.
+    default_visibility = settings.default_visibility or "staging"
 
     reqs: list[dict] = []
     skipped: list[dict] = []
     for it in leaves:
         code = it["name"]
+        ov = overrides.get(it.get("item_group") or "", {})
+        if ov.get("exclude"):
+            skipped.append({"code": code, "reason": "item group excluded from Meta catalog"})
+            continue
         rate = prices.get(code)
         if not rate:
             skipped.append({"code": code, "reason": "no Item Price in selling price list"})
@@ -154,7 +176,6 @@ def _build_payloads(item_codes: list[str] | None, settings) -> tuple[list[dict],
         if not img:
             skipped.append({"code": code, "reason": "no public image (private/signed/missing, no fallback)"})
             continue
-        ov = overrides.get(it.get("item_group") or "", {})
         data = {
             "id": code,  # retailer_id == ERPNext item_code
             "title": (it.get("item_name") or code)[:_TITLE_MAX],
@@ -165,6 +186,7 @@ def _build_payloads(item_codes: list[str] | None, settings) -> tuple[list[dict],
             "link": f"{base_url}/shop/{code}",
             "image_link": img,
             "brand": it.get("brand") or settings.default_brand or "",
+            "visibility": ov.get("visibility") or default_visibility,
         }
         if it.get("variant_of"):
             data["item_group_id"] = it["variant_of"]  # group a template's variants together

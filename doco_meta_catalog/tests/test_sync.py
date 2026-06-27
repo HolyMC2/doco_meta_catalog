@@ -23,6 +23,7 @@ class FakeSettings:
         self.default_condition = kw.get("default_condition", "new")
         self.image_url_base = kw.get("image_url_base", "https://shop.example.com")
         self.fallback_image_url = kw.get("fallback_image_url", "")
+        self.default_visibility = kw.get("default_visibility", "staging")
         self._category_map = kw.get("category_map", [])
 
     def get(self, key):
@@ -77,6 +78,7 @@ class TestBuildPayloads(unittest.TestCase):
         self.assertEqual(d["brand"], "Anker")
         self.assertEqual(d["link"], "https://shop.example.com/shop/IT-A")  # Meta field is 'link'
         self.assertEqual(d["image_link"], "https://shop.example.com/files/x.png")
+        self.assertEqual(d["visibility"], "staging")  # default = hidden until reviewed
         self.assertNotIn("item_group_id", d)
 
     def test_low_stock_is_in_stock(self):
@@ -144,6 +146,42 @@ class TestBuildPayloads(unittest.TestCase):
         )
         self.assertEqual(reqs[0]["data"]["condition"], "new")
         self.assertNotIn("google_product_category", reqs[0]["data"])
+
+    def test_group_visibility_override(self):
+        cmap = [{"item_group": "Promos", "visibility": "published"}]
+        reqs, _ = _run(
+            [_leaf("IT-A", item_group="Promos")],
+            {"IT-A": 100.0}, {"IT-A": "in"},
+            FakeSettings(default_visibility="staging", category_map=cmap),
+        )
+        self.assertEqual(reqs[0]["data"]["visibility"], "published")  # group override beats default
+
+    def test_eligible_excludes_orphan_variants(self):
+        # a variant whose TEMPLATE is unpublished must be dropped (stale publish_on_web copy)
+        leaves = [
+            _leaf("V1", variant_of="T1"),
+            _leaf("V2", variant_of="T2"),
+            _leaf("S1", variant_of=None),
+        ]
+
+        def fake_get_all(dt, filters=None, fields=None, pluck=None, limit_page_length=None, **k):
+            if pluck == "name":
+                return ["T1"]  # only template T1 is published
+            return leaves
+
+        with patch.object(sync.frappe, "get_all", side_effect=fake_get_all):
+            out = sync._eligible_leaves(["V1", "V2", "S1"])
+        self.assertEqual({l["name"] for l in out}, {"V1", "S1"})  # V2 dropped: T2 unpublished
+
+    def test_excluded_group_skipped(self):
+        cmap = [{"item_group": "Negociable", "exclude": 1}]
+        reqs, skipped = _run(
+            [_leaf("IT-A", item_group="Negociable")],
+            {"IT-A": 100.0}, {"IT-A": "in"},
+            FakeSettings(category_map=cmap),
+        )
+        self.assertEqual(reqs, [])
+        self.assertEqual(skipped, [{"code": "IT-A", "reason": "item group excluded from Meta catalog"}])
 
 
 if __name__ == "__main__":

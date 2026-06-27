@@ -12,10 +12,12 @@
   "column_break_meta",
   "whatsapp_account",
   "access_token",
+  "app_secret",
   "section_break_defaults",
   "default_currency",
   "default_brand",
   "default_condition",
+  "default_visibility",
   "column_break_defaults",
   "default_availability",
   "price_markup_percent",
@@ -77,6 +79,12 @@
    "description": "System User token with scopes: catalog_management (+ whatsapp_business_management if you also send product messages from here)."
   },
   {
+   "fieldname": "app_secret",
+   "fieldtype": "Password",
+   "label": "Meta App Secret (inbound webhook HMAC)",
+   "description": "Your Meta App's App Secret. Used to verify X-Hub-Signature-256 (HMAC-SHA256 of the raw request body) on inbound order webhooks. Required before pointing Meta's webhook at the connector endpoint. App Dashboard -> App Settings -> Basic -> App Secret."
+  },
+  {
    "fieldname": "section_break_defaults",
    "fieldtype": "Section Break",
    "label": "Product Defaults"
@@ -101,6 +109,14 @@
    "fieldtype": "Select",
    "label": "Default Condition",
    "options": "new\nrefurbished\nused\nused_like_new\nused_good\nused_fair"
+  },
+  {
+   "default": "staging",
+   "fieldname": "default_visibility",
+   "fieldtype": "Select",
+   "label": "Default Visibility",
+   "options": "staging\npublished",
+   "description": "staging = synced to the catalog but NOT shown on public Facebook/Instagram (review in Commerce Manager first). published = live to shoppers. Start with staging; flip to published + run Sync All Now when ready, or override per item group in the Category & Condition Mapping below."
   },
   {
    "fieldname": "column_break_defaults",
