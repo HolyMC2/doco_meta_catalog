@@ -12,7 +12,6 @@
   "column_break_meta",
   "whatsapp_account",
   "access_token",
-  "app_secret",
   "section_break_defaults",
   "default_currency",
   "default_brand",
@@ -80,12 +79,6 @@
    "fieldtype": "Password",
    "label": "Meta Access Token",
    "description": "System User token with scopes: catalog_management (+ whatsapp_business_management if you also send product messages from here)."
-  },
-  {
-   "fieldname": "app_secret",
-   "fieldtype": "Password",
-   "label": "Meta App Secret (inbound webhook HMAC)",
-   "description": "Your Meta App's App Secret. Used to verify X-Hub-Signature-256 (HMAC-SHA256 of the raw request body) on inbound order webhooks. Required before pointing Meta's webhook at the connector endpoint. App Dashboard -> App Settings -> Basic -> App Secret."
   },
   {
    "fieldname": "section_break_defaults",

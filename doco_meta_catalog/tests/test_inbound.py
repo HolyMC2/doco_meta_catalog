@@ -56,6 +56,25 @@ class TestInboundPickoff(unittest.TestCase):
             self.assertEqual(args[0]["id"], "wamid.Z")
             self.assertEqual(args[0]["order"]["product_items"][0]["product_retailer_id"], "A")
 
+    def test_process_order_raises_on_bad_json(self):
+        # a real persisted order with unparseable JSON must RAISE (→ RQ failed queue), never swallow
+        row = {"content_type": "order", "message_id": "wamid.B", "from": "+5216691234567", "product_catalog_json": "not-json{"}
+        with patch.object(inbound.frappe, "set_user"), \
+             patch.object(inbound.frappe.db, "get_value", return_value=row), \
+             patch.object(inbound.frappe, "log_error"), \
+             patch.object(wa_helpers, "handle_order_message") as h:
+            with self.assertRaises(Exception):
+                inbound.process_order("WM-2")
+            h.assert_not_called()
+
+    def test_process_order_non_dict_json_is_empty_order(self):
+        row = {"content_type": "order", "message_id": "wamid.C", "from": "+5216691234567", "product_catalog_json": "[]"}
+        with patch.object(inbound.frappe, "set_user"), \
+             patch.object(inbound.frappe.db, "get_value", return_value=row), \
+             patch.object(wa_helpers, "handle_order_message") as h:
+            inbound.process_order("WM-3")
+            self.assertEqual(h.call_args[0][0]["order"], {})  # valid-JSON non-dict → empty, not a crash
+
 
 # ---------------- order -> SO ----------------
 
@@ -177,6 +196,11 @@ class TestHandleOrder(unittest.TestCase):
         ])
         _, fake, _ = self._run(msg, eligible=["A", "B"], prices={"A": 10.0, "B": 5.0})
         self.assertEqual([i["item_code"] for i in fake.items], ["B"])  # bad line dropped, order survives
+
+    def test_buyer_note_attached(self):
+        msg = _order_msg([{"product_retailer_id": "A", "quantity": 1}], text="urgente, gracias")
+        _, fake, _ = self._run(msg, eligible=["A"], prices={"A": 10.0})
+        self.assertTrue(any("urgente" in (c or "") for c in fake.comments))
 
 
 if __name__ == "__main__":

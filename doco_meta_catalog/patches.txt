@@ -1,0 +1,1 @@
+doco_meta_catalog.patches.remove_catalog_app_secret

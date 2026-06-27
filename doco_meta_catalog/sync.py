@@ -391,16 +391,22 @@ def full_reconcile():
     # PARITY CHECK: items_batch 200 = "accepted", not "ingested". Read the catalog back so a silent
     # item cap or async rejection that drops items is reported instead of a falsely-green status.
     in_catalog = _catalog_product_count(s)
-    drift = (sent - in_catalog) if in_catalog is not None else None
-    if rejected or (drift is not None and drift > 0):
-        status = f"WARN: {sent} sent, {in_catalog} in catalog"
-        if rejected:
-            status += f", {rejected} item errors"
-        if drift and drift > 0:
-            status += f", {drift} NOT ingested (likely unverified-business cap / async rejects)"
-        frappe.log_error(title="Meta Catalog reconcile drift", message=status)
+    if in_catalog is None:
+        # count unreadable → NOT green: the whole point of the read-back is to catch the silent cap,
+        # so a transient/permission read failure must surface, not fall through to OK.
+        status = f"UNVERIFIED: {sent} sent, catalog count unreadable"
+        frappe.log_error(title="Meta Catalog reconcile: count unreadable", message=status)
     else:
-        status = f"OK ({sent} sent, {len(skipped)} skipped, {in_catalog} in catalog)"
+        drift = sent - in_catalog
+        if rejected or drift > 0:
+            status = f"WARN: {sent} sent, {in_catalog} in catalog"
+            if rejected:
+                status += f", {rejected} item errors"
+            if drift > 0:
+                status += f", {drift} NOT ingested (likely unverified-business cap / async rejects)"
+            frappe.log_error(title="Meta Catalog reconcile drift", message=status)
+        else:
+            status = f"OK ({sent} sent, {len(skipped)} skipped, {in_catalog} in catalog)"
     frappe.db.set_value(
         SETTINGS_DOCTYPE,
         SETTINGS_DOCTYPE,

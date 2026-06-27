@@ -245,14 +245,18 @@ def handle_order_message(
     if not msg_id:
         return None  # no WhatsApp message id → cannot dedup; real Meta orders always carry one
 
+    note = (order.get("text") or "").strip()
+
     # build the priced, sellable lines FIRST (reads only — safe to recompute on a retry) so that an
-    # order with nothing sellable never claims a dedup row and never creates a Customer/SO.
-    items = items[: _sf._MAX_LINES]
-    codes = [pi.get("product_retailer_id") for pi in items if pi.get("product_retailer_id")]
+    # order with nothing sellable never claims a dedup row and never creates a Customer/SO. Aggregate
+    # qty per SKU (bounded iteration caps abuse), THEN cap DISTINCT lines so a big cart with repeats
+    # can't silently drop distinct codes past the line limit.
+    scan = items[: _sf._MAX_LINES * 10]  # ≤500 — far above any real cart, bounds a malicious one
+    codes = [pi.get("product_retailer_id") for pi in scan if pi.get("product_retailer_id")]
     eligible = {it["name"] for it in sync._eligible_leaves(codes)}  # publish_on_web, leaf
     prices = _sf._prices(list(eligible), _sf._selling_price_list())
     agg: dict[str, int] = {}
-    for pi in items:
+    for pi in scan:
         code = pi.get("product_retailer_id")
         if code not in eligible or not prices.get(code):
             continue  # not a published / priced / sellable item (forged, unknown, or unpriced)
@@ -265,14 +269,17 @@ def handle_order_message(
         agg[code] = agg.get(code, 0) + qty
     if not agg:
         return None  # nothing sellable → no claim, no Customer, no SO
+    if len(agg) > _sf._MAX_LINES:
+        frappe.log_error(title="WA order exceeds line cap", message=f"{len(agg)} distinct items → capped to {_sf._MAX_LINES}")
+        agg = dict(list(agg.items())[: _sf._MAX_LINES])
     lines = [
         {"item_code": code, "qty": min(qty, _sf._MAX_QTY), "rate": flt(prices[code])}
         for code, qty in agg.items()
     ]
 
-    # ATOMIC claim + SO: insert the dedup row (no commit) then the SO, and commit ONCE. A failure
-    # anywhere in here rolls BOTH back, so a retry re-creates the order — never an orphan claim that
-    # would make the retry drop a real order. Concurrent retries race on the UNIQUE index.
+    # ATOMIC claim + SO + note: insert the dedup row (no commit), the SO, and the buyer note, then
+    # commit ONCE. A failure anywhere rolls ALL back, so a retry re-creates the order — never an
+    # orphan claim that would make the retry drop a real order. Concurrent retries race on the index.
     if not _claim_order(msg_id):
         return None  # already ingested
     try:
@@ -294,14 +301,12 @@ def handle_order_message(
             so.append("items", {**ln, "delivery_date": delivery})
         so.insert(ignore_permissions=True)
         frappe.db.set_value("Meta Order Log", {"wa_msg_id": msg_id}, "sales_order", so.name, update_modified=False)
-        frappe.db.commit()  # claim + SO committed together
+        if note:
+            so.add_comment("Comment", text=f"Nota del comprador (WhatsApp): {escape_html(note)[:500]}")
+        frappe.db.commit()  # claim + SO + note committed together
     except Exception:
         frappe.db.rollback()  # drop the claim too → a retry re-processes the real order
         raise
-
-    note = (order.get("text") or "").strip()
-    if note:
-        so.add_comment("Comment", text=f"Nota del comprador (WhatsApp): {escape_html(note)[:500]}")
     return so.name
 
 

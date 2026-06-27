@@ -24,24 +24,35 @@ import frappe
 
 
 def on_whatsapp_message(doc, method=None):
-    """after_insert on WhatsApp Message — enqueue order->SO for INBOUND `order` rows only."""
+    """after_insert on WhatsApp Message — enqueue order->SO for INBOUND `order` rows only.
+
+    Runs INSIDE frappe_whatsapp's still-open insert transaction, so:
+      - enqueue_after_commit=True: dispatch the RQ job only after the row commits, else a free worker
+        re-fetches it as None and the order vanishes with no error.
+      - the enqueue is guarded: a Redis/RQ outage must NEVER bubble up through doc.insert() and
+        roll back / 500 the live inbox webhook.
+    """
     if (doc.get("content_type") or "") != "order":
         return
     if (doc.get("type") or "").lower() == "outgoing":
         return  # ignore our own echoes / outgoing rows
-    frappe.enqueue(
-        "doco_meta_catalog.inbound.process_order",
-        queue="short",
-        job_id=f"wa_order::{doc.name}",
-        deduplicate=True,
-        wa_message=doc.name,
-    )
+    try:
+        frappe.enqueue(
+            "doco_meta_catalog.inbound.process_order",
+            queue="short",
+            job_id=f"wa_order::{doc.name}",
+            deduplicate=True,
+            enqueue_after_commit=True,
+            wa_message=doc.name,
+        )
+    except Exception:
+        frappe.log_error(title="WA order enqueue failed", message=frappe.get_traceback())
 
 
 def process_order(wa_message: str):
     """Background worker: rebuild the Meta order payload from the WhatsApp Message row and create a
-    DRAFT Sales Order. Runs as Administrator (background job). A raise lands in the RQ failed queue."""
-    frappe.set_user("Administrator")
+    DRAFT Sales Order. A raise lands the job in the RQ failed queue (visible + retryable) — we never
+    swallow a real persisted order."""
     from doco_meta_catalog import wa_helpers
 
     row = frappe.db.get_value(
@@ -52,9 +63,13 @@ def process_order(wa_message: str):
     )
     if not row or (row.get("content_type") or "") != "order":
         return
+    frappe.set_user("Administrator")  # past the guards; the SO/Customer inserts need elevation
     try:
         order = json.loads(row.get("product_catalog_json") or "{}")
     except Exception:
-        order = {}
+        frappe.log_error(title="WA order JSON parse failed", message=f"wa_message={wa_message}")
+        raise  # do not silently drop a real order — let it land in the RQ failed queue
+    if not isinstance(order, dict):
+        order = {}  # a valid-JSON list/scalar is not an order payload
     message = {"id": row.get("message_id"), "from": row.get("from"), "order": order}
     wa_helpers.handle_order_message(message, trusted=True)

@@ -76,10 +76,11 @@ deleted `webhook.py` (HMAC-fronting) is in git history if a signed-edge deployme
 ## 4. Data model (doctypes)
 
 - **Meta Catalog Settings** (Single) — `enabled` (master gate), `catalog_id`,
-  `graph_api_version`, `whatsapp_account` | `access_token`, **`app_secret` (NEW, Password — for
-  inbound HMAC)**, default brand/condition/currency, `image_url_base` + `fallback_image_url`,
-  `price_markup_percent` (0 = parity), `category_map`. (`sync_only_website_items`,
-  `default_availability` = deprecated/no-op.)
+  `graph_api_version`, `whatsapp_account` | `access_token`, default brand/condition/currency,
+  `image_url_base` + `fallback_image_url`, `price_markup_percent` (0 = parity), `category_map`,
+  `variant_group_attribute` / `variant_color_attribute`. (`sync_only_website_items`,
+  `default_availability` = deprecated/no-op. The old `app_secret`/HMAC webhook was removed — inbound
+  is now the async doc-event pickoff in §C, not a signed edge endpoint.)
 - **Meta Catalog Category Map** (child) — `item_group → condition / google_product_category`.
 
 Token: `get_token()` reuses a `WhatsApp Account` token if set, else `access_token`. Token needs
