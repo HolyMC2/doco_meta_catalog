@@ -46,6 +46,10 @@ def on_whatsapp_message(doc, method=None):
         _enqueue("process_order", doc.name, "wa_order")
     elif ct == "button" and (doc.get("message") or "").startswith("doco:"):
         _enqueue("process_menu_button", doc.name, "wa_menu")  # MA-2 (gate checked in worker)
+    elif ct == "flow":
+        _enqueue("process_flow_intake", doc.name, "wa_flow")  # MA-11 (gate checked in worker)
+    elif ct in ("image", "video"):
+        _enqueue("process_media", doc.name, "wa_media")  # MA-12 (gate checked in worker)
     elif ct == "text" and _wants_text_capture(doc):
         _enqueue("process_inbound_text", doc.name, "wa_reftext")  # MA-6
 
@@ -108,6 +112,18 @@ def process_ctwa(wa_message: str):
     """MA-4 worker: capture a CTWA click off an inbound message carrying ctwa_clid."""
     from doco_meta_catalog import ctwa
     ctwa.on_inbound_message(wa_message)
+
+
+def process_flow_intake(wa_message: str):
+    """MA-11 worker: a WhatsApp Flow completion -> CRM Lead."""
+    from doco_meta_catalog import intake
+    intake.process_flow(wa_message)
+
+
+def process_media(wa_message: str):
+    """MA-12 worker: attach an inbound photo/video to the sender's open Repair Order."""
+    from doco_meta_catalog import media
+    media.process_media(wa_message)
 
 
 def process_inbound_text(wa_message: str):

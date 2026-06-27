@@ -35,6 +35,9 @@
   "column_break_inbound",
   "deeplink_capture_enabled",
   "business_whatsapp_number",
+  "intake_enabled",
+  "intake_flow_id",
+  "media_capture_enabled",
   "section_break_capi",
   "capi_enabled",
   "capi_dataset_id",
@@ -236,6 +239,26 @@
    "description": "Dialable E.164 number (e.g. 5216691234567) used as the default for build_wa_link() wa.me links. The WhatsApp Account stores only the API phone_id, not this."
   },
   {
+   "default": "0",
+   "fieldname": "intake_enabled",
+   "fieldtype": "Check",
+   "label": "Enable Flow Intake -> CRM Lead (MA-11)",
+   "description": "When a WhatsApp Flow completes, create a CRM Lead from the responses. Endpoint-free flow: the data arrives via the webhook (content_type=flow)."
+  },
+  {
+   "fieldname": "intake_flow_id",
+   "fieldtype": "Data",
+   "label": "Intake Flow ID",
+   "description": "Only act on completions of THIS WhatsApp Flow id (blank = any flow). Set it to the repair-intake flow so other flows don't create leads."
+  },
+  {
+   "default": "0",
+   "fieldname": "media_capture_enabled",
+   "fieldtype": "Check",
+   "label": "Capture Inbound Media -> Repair Order (MA-12)",
+   "description": "Attach an inbound photo/video to the sender's open Repair Order (e.g. a cracked-screen photo). No-op if taller is not installed or the sender has no open RO."
+  },
+  {
    "fieldname": "section_break_capi",
    "fieldtype": "Section Break",
    "label": "Conversions API (MA-3)",
@@ -305,7 +328,7 @@
  ],
  "issingle": 1,
  "links": [],
- "modified": "2026-06-27 23:45:00.000000",
+ "modified": "2026-06-28 00:10:00.000000",
  "modified_by": "Administrator",
  "module": "Doco Meta Catalog",
  "name": "Meta Catalog Settings",
