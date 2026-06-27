@@ -35,6 +35,13 @@
   "column_break_inbound",
   "deeplink_capture_enabled",
   "business_whatsapp_number",
+  "section_break_capi",
+  "capi_enabled",
+  "capi_dataset_id",
+  "capi_purchase_source",
+  "column_break_capi",
+  "capi_access_token",
+  "capi_test_event_code",
   "section_break_status",
   "last_full_reconcile",
   "last_full_reconcile_status",
@@ -229,6 +236,49 @@
    "description": "Dialable E.164 number (e.g. 5216691234567) used as the default for build_wa_link() wa.me links. The WhatsApp Account stores only the API phone_id, not this."
   },
   {
+   "fieldname": "section_break_capi",
+   "fieldtype": "Section Break",
+   "label": "Conversions API (MA-3)",
+   "description": "Server-side Purchase/Lead events to a Meta dataset (Pixel). Uses a SEPARATE dataset-scoped token, not the catalog token. Default off."
+  },
+  {
+   "default": "0",
+   "fieldname": "capi_enabled",
+   "fieldtype": "Check",
+   "label": "Enable Conversions API",
+   "description": "When on, a submitted Sales Invoice emits Purchase and a new CRM Lead emits Lead (hashed PII, deduped by doc name)."
+  },
+  {
+   "fieldname": "capi_dataset_id",
+   "fieldtype": "Data",
+   "label": "Dataset / Pixel ID",
+   "description": "Numeric dataset ID from Meta Events Manager."
+  },
+  {
+   "default": "website",
+   "fieldname": "capi_purchase_source",
+   "fieldtype": "Select",
+   "label": "Purchase Action Source",
+   "options": "website\nbusiness_messaging\nsystem_generated\nphysical_store",
+   "description": "action_source for Purchase events without a CTWA click. MA-4 overrides to business_messaging when a click is on file."
+  },
+  {
+   "fieldname": "column_break_capi",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "capi_access_token",
+   "fieldtype": "Password",
+   "label": "Dataset Access Token",
+   "description": "Conversions API token for THIS dataset (Events Manager > Settings > Generate access token). Kept separate from the catalog token."
+  },
+  {
+   "fieldname": "capi_test_event_code",
+   "fieldtype": "Data",
+   "label": "Test Event Code",
+   "description": "Optional. From Events Manager > Test Events. When set, every event is sent as a test (visible there, not counted as real). Clear it to go live."
+  },
+  {
    "fieldname": "section_break_status",
    "fieldtype": "Section Break",
    "label": "Status",
@@ -255,7 +305,7 @@
  ],
  "issingle": 1,
  "links": [],
- "modified": "2026-06-27 23:30:00.000000",
+ "modified": "2026-06-27 23:45:00.000000",
  "modified_by": "Administrator",
  "module": "Doco Meta Catalog",
  "name": "Meta Catalog Settings",

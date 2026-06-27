@@ -12,3 +12,7 @@ class MetaCatalogSettings(Document):
 
     def get_graph_root(self):
         return f"https://graph.facebook.com/{self.graph_api_version or 'v21.0'}"
+
+    def get_capi_token(self):
+        """Conversions API dataset token — SEPARATE from the catalog/WhatsApp token."""
+        return self.get_password("capi_access_token", raise_exception=False)

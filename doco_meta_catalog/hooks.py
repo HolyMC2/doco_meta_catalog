@@ -18,6 +18,13 @@ doc_events = {
     "WhatsApp Message": {
         "after_insert": "doco_meta_catalog.inbound.on_whatsapp_message",
     },
+    # MA-3 Conversions API: server-side Purchase / Lead (no-op unless capi_enabled).
+    "Sales Invoice": {
+        "on_submit": "doco_meta_catalog.capi.on_sales_invoice_submit",
+    },
+    "CRM Lead": {
+        "after_insert": "doco_meta_catalog.capi.on_crm_lead_insert",
+    },
 }
 
 scheduler_events = {
