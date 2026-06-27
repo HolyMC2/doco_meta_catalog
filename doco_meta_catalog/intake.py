@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 
 import frappe
+from frappe.utils import escape_html
 
 _SETTINGS = "Meta Catalog Settings"
 _NAME_KEYS = ("nombre", "name", "first_name", "nombre_completo", "cliente")
@@ -50,8 +51,11 @@ def process_flow(wa_message: str):
     want_flow = (frappe.db.get_single_value(_SETTINGS, "intake_flow_id") or "").strip()
     if want_flow and (row.get("flow") or "") != want_flow:
         return  # a different flow — not our intake
+    # Dedup marker lives on the WhatsApp Message (always exists) so the claim is
+    # decoupled from the lead and written FIRST — atomic with the lead in this txn.
     marker = f"wa-flow-intake:{row.get('message_id')}"
-    if frappe.db.exists("Comment", {"reference_doctype": "CRM Lead", "content": marker}):
+    if frappe.db.exists("Comment", {"reference_doctype": "WhatsApp Message",
+                                    "reference_name": wa_message, "content": marker}):
         return  # already created
     try:
         resp = json.loads(row.get("flow_response") or "{}")
@@ -62,6 +66,11 @@ def process_flow(wa_message: str):
         resp = {}
 
     frappe.set_user("Administrator")
+    # claim FIRST
+    frappe.get_doc({
+        "doctype": "Comment", "comment_type": "Info",
+        "reference_doctype": "WhatsApp Message", "reference_name": wa_message, "content": marker,
+    }).insert(ignore_permissions=True)
     full_name = _pick(resp, _NAME_KEYS) or row.get("profile_name") or "WhatsApp"
     parts = full_name.split(" ", 1)
     phone = _pick(resp, _PHONE_KEYS) or row.get("from")
@@ -74,15 +83,13 @@ def process_flow(wa_message: str):
     })
     lead.flags.ignore_permissions = True
     lead.insert(ignore_permissions=True)
-    # Keep the full intake (device, issue, anything else) on the lead timeline + the dedup marker.
-    summary = "\n".join(f"{k}: {v}" for k, v in resp.items() if v) or "Flow completed"
+    # Keep the full intake on the lead timeline. ESCAPE: flow_response is attacker-
+    # controlled over an UNSIGNED webhook and Comment content renders as HTML (XSS).
+    summary = "\n".join(f"{escape_html(str(k))}: {escape_html(str(v))}"
+                        for k, v in resp.items() if v) or "Flow completed"
     frappe.get_doc({
         "doctype": "Comment", "comment_type": "Comment",
         "reference_doctype": "CRM Lead", "reference_name": lead.name,
-        "content": f"Intake WhatsApp Flow:\n{summary}",
-    }).insert(ignore_permissions=True)
-    frappe.get_doc({
-        "doctype": "Comment", "comment_type": "Info",
-        "reference_doctype": "CRM Lead", "reference_name": lead.name, "content": marker,
+        "content": f"Intake WhatsApp Flow:<br>{summary}",
     }).insert(ignore_permissions=True)
     return lead.name

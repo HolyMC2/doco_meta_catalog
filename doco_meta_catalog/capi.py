@@ -38,9 +38,15 @@ def _hash(v) -> str | None:
 
 
 def _hash_phone(v) -> str | None:
-    """SHA256 of digits-only phone (country code included, no +/spaces)."""
+    """SHA256 of the phone in E.164 digits (country code, no +/spaces) — Meta matching
+    REQUIRES the country code, so a bare 10-digit MX national number is prefixed 52, else
+    the hash never matches and CAPI/CTWA attribution is silently lost."""
     d = re.sub(r"\D", "", str(v or ""))
-    return hashlib.sha256(d.encode()).hexdigest() if d else None
+    if not d:
+        return None
+    if len(d) == 10:  # bare MX national number
+        d = "52" + d
+    return hashlib.sha256(d.encode()).hexdigest()
 
 
 def _user_data(*, email=None, phone=None, first=None, last=None, ctwa_clid=None) -> dict:
@@ -130,6 +136,10 @@ def on_sales_invoice_submit(doc, method=None):
     """Sales Invoice on_submit -> CAPI Purchase. action_source from settings."""
     if not _enabled():
         return
+    # A credit note is not a conversion (would emit a NEGATIVE-value Purchase); a
+    # zero/negative total isn't a sale. Skip both so the dataset isn't polluted.
+    if doc.get("is_return") or flt(doc.get("grand_total")) <= 0:
+        return
     c = _customer_contact(doc.get("customer"))
     email = doc.get("contact_email") or c.get("email_id")
     phone = doc.get("contact_mobile") or c.get("mobile_no")
@@ -170,8 +180,11 @@ def on_crm_lead_insert(doc, method=None):
 
 @frappe.whitelist()
 def send_test_event():
-    """Fire a Test event (set capi_test_event_code first, watch Events Manager > Test Events)."""
+    """Fire a Test event — REFUSES unless capi_test_event_code is set, so it can't leak a
+    real Lead into the production dataset. Watch Events Manager > Test Events."""
     frappe.only_for("System Manager")
+    if not (frappe.db.get_single_value(_SETTINGS, "capi_test_event_code") or "").strip():
+        frappe.throw(frappe._("Set a Test Event Code first (else this would send a real event)."))
     emit("Lead", f"test-{frappe.generate_hash(length=8)}",
          user_data=_user_data(email="test@example.com", phone="5215555550000"),
          action_source="website")

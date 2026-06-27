@@ -21,18 +21,26 @@ _CLOSED = ("Entregado", "Cancelado")
 
 def _open_ro_for_phone(phone: str | None) -> str | None:
     """Most recent OPEN Repair Order whose client Contact matches the phone (last 10
-    digits). None if taller absent / no contact / no open RO."""
+    digits). None if taller absent / no contact / AMBIGUOUS contact (>1 match — don't
+    attach a stranger's photo to the wrong customer) / no open RO."""
     digits = re.sub(r"\D", "", str(phone or ""))[-10:]
     if len(digits) < 10:
         return None
-    contact = frappe.db.get_value("Contact", {"mobile_no": ["like", f"%{digits}"]}, "name")
-    if not contact:
-        return None
+    contacts = frappe.get_all("Contact", filters={"mobile_no": ["like", f"%{digits}"]},
+                              fields=["name"], limit=2)
+    if len(contacts) != 1:
+        return None  # zero or ambiguous → bail (cross-customer poisoning guard)
     rows = frappe.get_all(
         "Repair Order",
-        filters={"client": contact, "status": ["not in", _CLOSED]},
+        filters={"client": contacts[0].name, "status": ["not in", _CLOSED]},
         fields=["name"], order_by="creation desc", limit=1)
     return rows[0].name if rows else None
+
+
+def _is_local_file_url(url: str) -> bool:
+    """Only re-attach files frappe itself stored (no remote URL / traversal)."""
+    u = str(url or "")
+    return (u.startswith("/files/") or u.startswith("/private/files/")) and ".." not in u
 
 
 def process_media(wa_message: str):
@@ -43,21 +51,29 @@ def process_media(wa_message: str):
         ["from", "attach", "content_type", "type", "message_id", "message"], as_dict=True)
     if not row or (row.content_type or "") not in _MEDIA_TYPES or (row.type or "").lower() == "outgoing":
         return
-    if not row.get("attach"):
-        return  # frappe_whatsapp hasn't attached the file (download failed)
+    file_url = row.get("attach")
+    if not file_url or not _is_local_file_url(file_url):
+        return  # no/invalid attachment (download failed, or a non-local url we won't trust)
     if not frappe.db.get_single_value(_SETTINGS, "media_capture_enabled"):
         return
     if not frappe.db.exists("DocType", "Repair Order"):
         return
+    # NOTE: `from` is attacker-controllable (frappe_whatsapp's webhook is unsigned), so a
+    # forged sender could target a victim's RO — bounded by the unambiguous-contact match
+    # above + the gate. Do not relax without an inbound signature.
     ro = _open_ro_for_phone(row.get("from"))
     if not ro:
         return
+    # Claim FIRST on the WhatsApp Message (decoupled, atomic with the attach in this txn).
     marker = f"wa-media:{row.get('message_id')}"
-    if frappe.db.exists("Comment", {"reference_doctype": "Repair Order", "reference_name": ro, "content": marker}):
+    if frappe.db.exists("Comment", {"reference_doctype": "WhatsApp Message",
+                                    "reference_name": wa_message, "content": marker}):
         return
-
     frappe.set_user("Administrator")
-    file_url = row.get("attach")
+    frappe.get_doc({
+        "doctype": "Comment", "comment_type": "Info",
+        "reference_doctype": "WhatsApp Message", "reference_name": wa_message, "content": marker,
+    }).insert(ignore_permissions=True)
     frappe.get_doc({
         "doctype": "File",
         "file_url": file_url,
@@ -70,10 +86,6 @@ def process_media(wa_message: str):
     frappe.get_doc({
         "doctype": "Comment", "comment_type": "Comment",
         "reference_doctype": "Repair Order", "reference_name": ro,
-        "content": f"📷 Foto recibida por WhatsApp{(': ' + caption) if caption else ''}",
-    }).insert(ignore_permissions=True)
-    frappe.get_doc({
-        "doctype": "Comment", "comment_type": "Info",
-        "reference_doctype": "Repair Order", "reference_name": ro, "content": marker,
+        "content": f"📷 Foto recibida por WhatsApp{(': ' + frappe.utils.escape_html(caption)) if caption else ''}",
     }).insert(ignore_permissions=True)
     return ro

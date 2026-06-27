@@ -36,6 +36,7 @@ def _clean_ref(ref: str) -> str:
 def build_wa_link(ref: str, text: str | None = None, number: str | None = None) -> str:
     """wa.me share link whose prefilled text carries ``[ref:CODE]`` for attribution.
     ``number`` (business WhatsApp, E.164 digits) falls back to the settings field."""
+    frappe.only_for(["System Manager", "Sales User"])
     ref = _clean_ref(ref)
     number = re.sub(r"\D", "", number or frappe.db.get_single_value(_SETTINGS, "business_whatsapp_number") or "")
     if not number:
@@ -48,6 +49,7 @@ def build_wa_link(ref: str, text: str | None = None, number: str | None = None) 
 def build_mme_link(ref: str, page: str | None = None) -> str:
     """m.me share link with a tracked ``ref`` param (surfaced to the Messenger webhook).
     ``page`` falls back to Messenger Settings.page_id."""
+    frappe.only_for(["System Manager", "Sales User"])
     ref = _clean_ref(ref)
     page = page or frappe.db.get_value("Messenger Settings", "Messenger Settings", "page_id")
     if not page:
@@ -80,8 +82,11 @@ def record_attribution(*, ref: str, channel: str, phone: str | None = None, mess
 
 
 def _contact_for_phone(phone: str | None) -> str | None:
-    """Best-effort Contact match by the last 10 digits of the phone, else None."""
+    """Best-effort Contact match by the last 10 digits, or None when absent OR ambiguous
+    (>1 contact shares the last 10 — don't attribute to the wrong party)."""
     digits = re.sub(r"\D", "", phone or "")[-10:]
     if len(digits) < 10:
         return None
-    return frappe.db.get_value("Contact", {"mobile_no": ["like", f"%{digits}"]}, "name")
+    contacts = frappe.get_all("Contact", filters={"mobile_no": ["like", f"%{digits}"]},
+                              fields=["name"], limit=2)
+    return contacts[0].name if len(contacts) == 1 else None

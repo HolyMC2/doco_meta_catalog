@@ -15,6 +15,7 @@ from __future__ import annotations
 import frappe
 from frappe.utils import add_days, now_datetime, today
 
+_SETTINGS = "Meta Catalog Settings"
 _DOCTYPE = "Meta CTWA Click"
 _ATTRIBUTION_DAYS = 7
 
@@ -48,16 +49,25 @@ def recent_click(phone: str | None, days: int = _ATTRIBUTION_DAYS) -> dict | Non
     rows = frappe.get_all(
         _DOCTYPE,
         filters={"phone": ["like", f"%{digits}"], "captured_at": [">=", add_days(today(), -days)]},
-        fields=["ctwa_clid", "source_id", "captured_at"],
+        fields=["ctwa_clid", "source_id", "captured_at", "phone"],
         order_by="captured_at desc",
-        limit=1,
+        limit=20,
     )
-    return rows[0] if rows else None
+    if not rows:
+        return None
+    # Bail if the last-10 match spans >1 distinct full number (e.g. +1 vs +52 sharing
+    # 10 digits) — don't attribute a sale to the wrong buyer's click.
+    fulls = {"".join(ch for ch in (r.get("phone") or "") if ch.isdigit()) for r in rows}
+    if len(fulls) > 1:
+        return None
+    return rows[0]
 
 
 def on_inbound_message(wa_message: str) -> None:
     """Worker (MA-4 capture): stamp a CTWA click from an inbound WhatsApp Message that
     carries a ctwa_clid (custom field). Dormant until frappe_whatsapp populates it."""
+    if not frappe.db.get_single_value(_SETTINGS, "deeplink_capture_enabled"):
+        return  # CTWA capture rides the same attribution gate as deep-link capture
     row = frappe.db.get_value(
         "WhatsApp Message", wa_message,
         ["from", "ctwa_clid", "ctwa_source_id", "type"], as_dict=True)

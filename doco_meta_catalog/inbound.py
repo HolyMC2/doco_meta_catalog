@@ -43,6 +43,10 @@ def on_whatsapp_message(doc, method=None):
         _enqueue("process_ctwa", doc.name, "wa_ctwa")
     ct = doc.get("content_type") or ""
     if ct == "order":
+        # Order intake is INTENTIONALLY independent of the catalog-sync `enabled` toggle
+        # (that gates outbound catalog pushes, not inbound carts) — gating it could silently
+        # drop a real customer order. handle_order_message is self-bounded (reprice +
+        # publish_on_web gate + draft-only + atomic dedup), so it's safe to always run.
         _enqueue("process_order", doc.name, "wa_order")
     elif ct == "button" and (doc.get("message") or "").startswith("doco:"):
         _enqueue("process_menu_button", doc.name, "wa_menu")  # MA-2 (gate checked in worker)

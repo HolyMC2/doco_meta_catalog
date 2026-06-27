@@ -188,6 +188,8 @@ def send_cta_url(to: str, body: str, url: str, button_text: str = "Pagar", foote
     checkout, so the sale completes off-Meta). Free inside the 24h window. Role/rate/E.164-gated like
     the catalog senders. [roadmap MA-2]"""
     _guard_send(to)
+    if not str(url or "").startswith("https://"):
+        frappe.throw(_("CTA URL must be an https:// link"))
     acct = _outgoing_account()
     payload = {
         "messaging_product": "whatsapp",
