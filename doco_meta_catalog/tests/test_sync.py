@@ -70,8 +70,8 @@ class TestBuildPayloads(unittest.TestCase):
         self.assertEqual(d["id"], "IT-A")  # retailer_id == item_code
         self.assertEqual(d["title"], "Cable USB-C")
         self.assertEqual(d["description"], "Carga rápida")  # HTML stripped
-        self.assertEqual(d["price"], 19900)  # minor units, from Item Price (NOT standard_rate)
-        self.assertEqual(d["currency"], "MXN")
+        self.assertEqual(d["price"], "199.00 MXN")  # string w/ currency, from Item Price (NOT standard_rate)
+        self.assertNotIn("currency", d)  # Meta items_batch rejects a separate currency field
         self.assertEqual(d["availability"], "in stock")
         self.assertEqual(d["condition"], "new")
         self.assertEqual(d["brand"], "Anker")
@@ -122,7 +122,7 @@ class TestBuildPayloads(unittest.TestCase):
 
     def test_markup_applied(self):
         reqs, _ = _run([_leaf("IT-A")], {"IT-A": 100.0}, {"IT-A": "in"}, FakeSettings(price_markup_percent=10))
-        self.assertEqual(reqs[0]["data"]["price"], 11000)  # 100 * 1.10 * 100
+        self.assertEqual(reqs[0]["data"]["price"], "110.00 MXN")  # 100 * 1.10
 
     def test_category_override(self):
         cmap = [{"item_group": "Seminuevos", "condition": "refurbished", "google_product_category": "267"}]

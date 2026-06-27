@@ -98,10 +98,14 @@ def _availability(level: str) -> str:
     return "out of stock" if level == "out" else "in stock"
 
 
-def _price_minor_units(amount) -> int:
-    """Meta items_batch wants the price as an integer in the currency minor unit
-    (19900 == $199.00). MXN / USD / EUR are all 2-decimal."""
-    return int(round(flt(amount) * 100))
+def _format_price(amount, currency: str) -> str:
+    """Meta items_batch wants price as a STRING carrying the ISO currency, e.g.
+    '2800.00 MXN'. A bare integer + a separate `currency` field is REJECTED by the API
+    (warning 'Unrecognized field: currency') and silently falls back to the catalog's
+    DEFAULT currency — our catalog defaults to USD, so an integer 280000 published as
+    $2,800.00 USD instead of MX$2,800.00 (a ~17x mispricing). The string form pins the
+    currency per item and is independent of the catalog default. Verified 2026-06-26."""
+    return f"{flt(amount):.2f} {currency or 'MXN'}"
 
 
 def _public_image(item: dict, settings) -> str | None:
@@ -157,8 +161,7 @@ def _build_payloads(item_codes: list[str] | None, settings) -> tuple[list[dict],
             "description": (strip_html_tags(it.get("description") or "") or it.get("item_name") or code)[:_DESC_MAX],
             "availability": _availability(levels.get(code, "out")),
             "condition": ov.get("condition") or settings.default_condition or "new",
-            "price": _price_minor_units(flt(rate) * markup),
-            "currency": currency,
+            "price": _format_price(flt(rate) * markup, currency),
             "link": f"{base_url}/shop/{code}",
             "image_link": img,
             "brand": it.get("brand") or settings.default_brand or "",
