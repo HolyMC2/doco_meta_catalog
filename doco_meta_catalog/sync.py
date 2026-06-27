@@ -189,9 +189,14 @@ def _post_items_batch(settings, requests_payload):
         timeout=60,
     )
     if r.status_code >= 400:
+        try:
+            err = (r.json() or {}).get("error", {})
+            meta_err = f"{err.get('code')}/{err.get('error_subcode')}: {err.get('message')}"
+        except Exception:
+            meta_err = r.text[:500]
         frappe.log_error(
             title=f"Meta Catalog push HTTP {r.status_code}",
-            message=f"URL: {url}\nPayload: {json.dumps(requests_payload)[:2000]}\nResponse: {r.text[:2000]}",
+            message=f"meta_error={meta_err}\nitems={len(requests_payload)} sample={json.dumps(requests_payload[:1])[:800]}",
         )
         r.raise_for_status()
     return r.json()

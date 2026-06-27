@@ -14,9 +14,29 @@ All outbound goes through the user-selected WhatsApp Account (defaults to is_def
 from __future__ import annotations
 
 import json
+import re
 
 import frappe
+from frappe import _
 import requests
+
+# Reuse the storefront's per-IP + global rate limiter so a single compromised / low-priv
+# Desk session cannot blast the business WhatsApp number or burn the metered quota.
+from doco.docoutils import storefront as _sf
+
+_E164 = re.compile(r"^\+?\d{8,15}$")
+_SEND_ROLES = ["System Manager", "Sales User"]
+
+
+def _guard_send(to: str | None = None) -> None:
+    """Authorize + rate-limit + validate recipient for EVERY outbound WhatsApp send.
+    The WABA number is a verified business asset — only real operators may send from it,
+    never faster than the bucket. SECURITY: do not weaken/remove; these senders are
+    @frappe.whitelist() and are otherwise reachable by any low-privilege Desk login."""
+    frappe.only_for(_SEND_ROLES)
+    _sf._rate_limit("wa_send", limit=30, window_sec=60)
+    if to is not None and not _E164.match(str(to or "").strip()):
+        frappe.throw(_("Invalid recipient phone number"))
 
 
 def _outgoing_account():
@@ -40,9 +60,15 @@ def _post_message(account, payload):
         timeout=30,
     )
     if r.status_code >= 400:
+        try:
+            err = (r.json() or {}).get("error", {})
+            meta_err = f"{err.get('code')}/{err.get('error_subcode')}: {err.get('message')}"
+        except Exception:
+            meta_err = f"HTTP {r.status_code}"
+        safe = {k: v for k, v in payload.items() if k != "to"}  # buyer phone (`to`) is PII — redact
         frappe.log_error(
-            title=f"WA product message HTTP {r.status_code}",
-            message=f"URL: {url}\nPayload: {json.dumps(payload)[:1500]}\nResponse: {r.text[:1500]}",
+            title=f"WA send HTTP {r.status_code}",
+            message=f"meta_error={meta_err}\npayload(no recipient)={json.dumps(safe)[:1000]}",
         )
         r.raise_for_status()
     return r.json()
@@ -55,6 +81,7 @@ def _catalog_id():
 @frappe.whitelist()
 def send_catalog_message(to: str, body: str = "Mira nuestro catálogo:", footer: str | None = None):
     """Single-button message that opens the connected catalog inside WhatsApp."""
+    _guard_send(to)
     acct = _outgoing_account()
     payload = {
         "messaging_product": "whatsapp",
@@ -74,6 +101,7 @@ def send_catalog_message(to: str, body: str = "Mira nuestro catálogo:", footer:
 @frappe.whitelist()
 def send_product_message(to: str, retailer_id: str, body: str = "", footer: str | None = None):
     """Single-product card. retailer_id == ERPNext item_code that was synced."""
+    _guard_send(to)
     acct = _outgoing_account()
     payload = {
         "messaging_product": "whatsapp",
@@ -102,6 +130,7 @@ def send_product_list(
         [{"title": "Accesorios", "product_items": ["IT-CABLE-USBC", "IT-CARG-30W"]}, ...]
     Max 10 sections, 30 total products across sections.
     """
+    _guard_send(to)
     if isinstance(sections, str):
         sections = json.loads(sections)
     acct = _outgoing_account()
