@@ -44,6 +44,13 @@ def _guard_send(to: str | None = None) -> None:
         frappe.throw(_("Invalid recipient phone number"))
 
 
+def _canon_phone(p: str) -> str:
+    """Digits-only canonical E.164 ('+<digits>') so the same number stored as '+52155…' or
+    '52155…' resolves to one Customer — reduces duplicate-customer forking on inbound orders."""
+    d = re.sub(r"\D", "", p or "")
+    return ("+" + d) if d else ""
+
+
 def _outgoing_account():
     """Pick the WhatsApp Account that sends product messages."""
     s = frappe.get_cached_doc("Meta Catalog Settings")
@@ -194,16 +201,25 @@ def handle_order_message(
     if not items:
         return None
 
-    from_number = (message.get("from") or "").strip()
+    from_number = _canon_phone((message.get("from") or "").strip())
     if not _E164.match(from_number):
         return None  # malformed / forged sender
 
     msg_id = str(message.get("id") or "")[:120]
     if not msg_id:
         return None  # no WhatsApp message id → cannot dedup; real Meta orders always carry one
+    # atomic idempotency: CLAIM the message id via a UNIQUE index. Two concurrent Meta retries
+    # race here — exactly one insert wins; the loser sees the duplicate and stops. Replaces a
+    # db.exists() TOCTOU that both racers could pass before either committed.
+    try:
+        frappe.get_doc({"doctype": "Meta Order Log", "wa_msg_id": msg_id}).insert(ignore_permissions=True)
+        frappe.db.commit()
+    except Exception:
+        frappe.db.rollback()
+        if frappe.db.exists("Meta Order Log", {"wa_msg_id": msg_id}):
+            return None  # already ingested
+        raise
     po_no = f"WA-{msg_id}"
-    if frappe.db.exists("Sales Order", {"po_no": po_no}):
-        return None  # idempotent: this WhatsApp order was already ingested (sequential replay-safe)
 
     items = items[: _sf._MAX_LINES]  # bound line count before any per-item work
 
@@ -255,6 +271,7 @@ def handle_order_message(
         so.append("items", {**ln, "delivery_date": delivery})
     so.insert(ignore_permissions=True)
     frappe.db.commit()
+    frappe.db.set_value("Meta Order Log", {"wa_msg_id": msg_id}, "sales_order", so.name, update_modified=False)
 
     note = (order.get("text") or "").strip()
     if note:

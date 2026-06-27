@@ -1,0 +1,51 @@
+{
+ "actions": [],
+ "creation": "2026-06-27 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "wa_msg_id",
+  "sales_order"
+ ],
+ "fields": [
+  {
+   "fieldname": "wa_msg_id",
+   "fieldtype": "Data",
+   "label": "WhatsApp Message ID",
+   "unique": 1,
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "The inbound WhatsApp order message id. UNIQUE — the DB index is the atomic idempotency guard (a claim-by-insert blocks concurrent Meta retries)."
+  },
+  {
+   "fieldname": "sales_order",
+   "fieldtype": "Link",
+   "label": "Sales Order",
+   "options": "Sales Order",
+   "read_only": 1,
+   "in_list_view": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-06-27 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Doco Meta Catalog",
+ "name": "Meta Order Log",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
