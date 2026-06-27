@@ -22,31 +22,100 @@ import json
 
 import frappe
 
+_SETTINGS = "Meta Catalog Settings"
+
 
 def on_whatsapp_message(doc, method=None):
-    """after_insert on WhatsApp Message — enqueue order->SO for INBOUND `order` rows only.
+    """after_insert on WhatsApp Message — ASYNC dispatch for INBOUND messages:
+      - `order` carts          -> draft Sales Order        (process_order)
+      - our namespaced buttons -> interactive menu reply    (process_menu_button, MA-2)
+      - text with a [ref:CODE] -> deep-link attribution     (process_inbound_text, MA-6)
 
-    Runs INSIDE frappe_whatsapp's still-open insert transaction, so:
-      - enqueue_after_commit=True: dispatch the RQ job only after the row commits, else a free worker
-        re-fetches it as None and the order vanishes with no error.
-      - the enqueue is guarded: a Redis/RQ outage must NEVER bubble up through doc.insert() and
-        roll back / 500 the live inbox webhook.
+    Runs INSIDE frappe_whatsapp's still-open insert transaction, so every dispatch is
+    enqueue_after_commit (the row must exist for the worker) and guarded — a Redis/RQ
+    outage must NEVER bubble through doc.insert() and 500 / roll back the live inbox.
     """
-    if (doc.get("content_type") or "") != "order":
-        return
     if (doc.get("type") or "").lower() == "outgoing":
         return  # ignore our own echoes / outgoing rows
+    ct = doc.get("content_type") or ""
+    if ct == "order":
+        _enqueue("process_order", doc.name, "wa_order")
+    elif ct == "button" and (doc.get("message") or "").startswith("doco:"):
+        _enqueue("process_menu_button", doc.name, "wa_menu")  # MA-2 (gate checked in worker)
+    elif ct == "text" and _wants_text_capture(doc):
+        _enqueue("process_inbound_text", doc.name, "wa_reftext")  # MA-6
+
+
+def _wants_text_capture(doc) -> bool:
+    """Cheap pre-filter so we don't spawn a worker for every chat line: only when the
+    body actually carries a ref token AND deep-link capture is enabled."""
+    from doco_meta_catalog import deeplinks
+    if not deeplinks.parse_ref(doc.get("message")):
+        return False
+    return bool(frappe.db.get_single_value(_SETTINGS, "deeplink_capture_enabled"))
+
+
+def _enqueue(method: str, name: str, prefix: str) -> None:
     try:
         frappe.enqueue(
-            "doco_meta_catalog.inbound.process_order",
+            f"doco_meta_catalog.inbound.{method}",
             queue="short",
-            job_id=f"wa_order::{doc.name}",
+            job_id=f"{prefix}::{name}",
             deduplicate=True,
             enqueue_after_commit=True,
-            wa_message=doc.name,
+            wa_message=name,
         )
     except Exception:
-        frappe.log_error(title="WA order enqueue failed", message=frappe.get_traceback())
+        frappe.log_error(title=f"WA {prefix} enqueue failed", message=frappe.get_traceback())
+
+
+def process_menu_button(wa_message: str):
+    """MA-2 worker: a customer tapped one of OUR namespaced menu buttons -> send the
+    matching interactive reply. Gated by inbound_menu_enabled (default off) so the
+    built-in menu never competes with a chatflow unless Marco opts in."""
+    from doco_meta_catalog import wa_helpers
+
+    row = frappe.db.get_value(
+        "WhatsApp Message", wa_message, ["from", "message", "content_type", "type"], as_dict=True)
+    if not row or (row.content_type or "") != "button" or (row.type or "").lower() == "outgoing":
+        return
+    bid = row.message or ""
+    if not bid.startswith(wa_helpers.MENU_PREFIX):
+        return
+    s = frappe.get_cached_doc(_SETTINGS)
+    if not s.get("inbound_menu_enabled"):
+        return
+    frappe.set_user("Administrator")  # senders are role-gated; the bot acts as the system
+    to = row.get("from")
+    if bid == wa_helpers.MENU_CATALOG:
+        wa_helpers.send_catalog_message(to)
+    elif bid == wa_helpers.MENU_ORDER:
+        wa_helpers.send_catalog_message(to, body="Arma tu pedido desde el catálogo y envíalo 🛒")
+    elif bid == wa_helpers.MENU_PAY:
+        url = (s.get("checkout_url") or "").strip()
+        if url:
+            wa_helpers.send_cta_url(to, "Completa tu pago aquí 👇", url, button_text="Pagar")
+        else:
+            frappe.log_error(title="MA-2 pay button: no checkout_url configured",
+                             message=f"wa_message={wa_message}")
+
+
+def process_inbound_text(wa_message: str):
+    """MA-6 worker: an inbound text carries a [ref:CODE] deep-link token -> record
+    attribution (CRM Touchpoint). Passive; no customer-facing send."""
+    from doco_meta_catalog import deeplinks
+
+    row = frappe.db.get_value(
+        "WhatsApp Message", wa_message,
+        ["from", "message", "content_type", "type", "message_id"], as_dict=True)
+    if not row or (row.content_type or "") != "text" or (row.type or "").lower() == "outgoing":
+        return
+    ref = deeplinks.parse_ref(row.message)
+    if not ref:
+        return
+    frappe.set_user("Administrator")
+    deeplinks.record_attribution(ref=ref, channel="WhatsApp", phone=row.get("from"),
+                                 message_id=row.get("message_id"))
 
 
 def process_order(wa_message: str):

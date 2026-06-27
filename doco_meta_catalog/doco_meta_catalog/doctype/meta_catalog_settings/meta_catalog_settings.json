@@ -29,6 +29,12 @@
   "section_break_variants",
   "variant_group_attribute",
   "variant_color_attribute",
+  "section_break_inbound",
+  "inbound_menu_enabled",
+  "checkout_url",
+  "column_break_inbound",
+  "deeplink_capture_enabled",
+  "business_whatsapp_number",
   "section_break_status",
   "last_full_reconcile",
   "last_full_reconcile_status",
@@ -187,6 +193,42 @@
    "description": "Item Attribute mapped to Meta's variant option, e.g. 'Color'. Blank = no variant option."
   },
   {
+   "fieldname": "section_break_inbound",
+   "fieldtype": "Section Break",
+   "label": "Inbound / Conversational",
+   "description": "Built-in WhatsApp menu (MA-2) and deep-link attribution (MA-6). Both default OFF; opt in per shop. The menu is an alternative to a chatflow, not a competitor."
+  },
+  {
+   "default": "0",
+   "fieldname": "inbound_menu_enabled",
+   "fieldtype": "Check",
+   "label": "Enable Inbound Menu (MA-2)",
+   "description": "When a customer taps a built-in menu button (Catálogo / Pedir / Pagar), reply with the matching interactive message. Send the menu via send_menu(to) from an operator or chatflow."
+  },
+  {
+   "fieldname": "checkout_url",
+   "fieldtype": "Data",
+   "label": "Checkout / Pay URL",
+   "description": "The off-Meta payment link (e.g. a Mercado Pago checkout) sent as a CTA-URL button when a customer taps Pagar. MX has no native WhatsApp checkout."
+  },
+  {
+   "fieldname": "column_break_inbound",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "deeplink_capture_enabled",
+   "fieldtype": "Check",
+   "label": "Capture Deep-Link Refs (MA-6)",
+   "description": "Record a CRM Touchpoint when an inbound message carries a [ref:CODE] token from a wa.me deep link built by build_wa_link()."
+  },
+  {
+   "fieldname": "business_whatsapp_number",
+   "fieldtype": "Data",
+   "label": "Business WhatsApp Number",
+   "description": "Dialable E.164 number (e.g. 5216691234567) used as the default for build_wa_link() wa.me links. The WhatsApp Account stores only the API phone_id, not this."
+  },
+  {
    "fieldname": "section_break_status",
    "fieldtype": "Section Break",
    "label": "Status",
@@ -213,7 +255,7 @@
  ],
  "issingle": 1,
  "links": [],
- "modified": "2026-05-24 22:30:00.000000",
+ "modified": "2026-06-27 23:30:00.000000",
  "modified_by": "Administrator",
  "module": "Doco Meta Catalog",
  "name": "Meta Catalog Settings",
