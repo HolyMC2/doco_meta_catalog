@@ -37,6 +37,10 @@ def on_whatsapp_message(doc, method=None):
     """
     if (doc.get("type") or "").lower() == "outgoing":
         return  # ignore our own echoes / outgoing rows
+    # MA-4: a CTWA ad click stamps ctwa_clid on the FIRST inbound message (any type).
+    # Dormant until frappe_whatsapp populates the field; the check is a cheap None.
+    if doc.get("ctwa_clid"):
+        _enqueue("process_ctwa", doc.name, "wa_ctwa")
     ct = doc.get("content_type") or ""
     if ct == "order":
         _enqueue("process_order", doc.name, "wa_order")
@@ -98,6 +102,12 @@ def process_menu_button(wa_message: str):
         else:
             frappe.log_error(title="MA-2 pay button: no checkout_url configured",
                              message=f"wa_message={wa_message}")
+
+
+def process_ctwa(wa_message: str):
+    """MA-4 worker: capture a CTWA click off an inbound message carrying ctwa_clid."""
+    from doco_meta_catalog import ctwa
+    ctwa.on_inbound_message(wa_message)
 
 
 def process_inbound_text(wa_message: str):
