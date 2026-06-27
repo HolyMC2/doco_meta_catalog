@@ -24,6 +24,8 @@ class FakeSettings:
         self.image_url_base = kw.get("image_url_base", "https://shop.example.com")
         self.fallback_image_url = kw.get("fallback_image_url", "")
         self.default_visibility = kw.get("default_visibility", "staging")
+        self.variant_group_attribute = kw.get("variant_group_attribute", "")
+        self.variant_color_attribute = kw.get("variant_color_attribute", "")
         self._category_map = kw.get("category_map", [])
 
     def get(self, key):
@@ -45,10 +47,12 @@ def _leaf(name, **kw):
     }
 
 
-def _run(leaves, prices, levels, settings, image_pass=True):
+def _run(leaves, prices, levels, settings, image_pass=True, vmeta=None):
     """Drive _build_payloads with patched storefront helpers. ``image_pass`` simulates the
-    storefront image guard: True → echo the raw path (public), False → None (private/signed)."""
+    storefront image guard: True → echo the raw path (public), False → None (private/signed).
+    ``vmeta`` overrides the variant-metadata resolver (default {} → group by template)."""
     with patch.object(sync, "_eligible_leaves", return_value=leaves), \
+         patch.object(sync, "_variant_meta", return_value=(vmeta or {})), \
          patch.object(sync.sf, "_selling_price_list", return_value="Standard Selling"), \
          patch.object(sync.sf, "_prices", return_value=prices), \
          patch.object(sync.sf, "_stock_levels", return_value=levels), \
@@ -121,6 +125,32 @@ class TestBuildPayloads(unittest.TestCase):
             {"IT-A-RED": 50.0}, {"IT-A-RED": "in"}, FakeSettings(),
         )
         self.assertEqual(reqs[0]["data"]["item_group_id"], "IT-A")
+
+    def test_variant_template_name_no_split(self):
+        # template-only grouping: the group is named after the TEMPLATE, not the variant
+        vmeta = {"IT-A-RED": {"template_name": "Silicone Case", "group_val": None, "color": None}}
+        reqs, _ = _run(
+            [_leaf("IT-A-RED", variant_of="IT-A")],
+            {"IT-A-RED": 50.0}, {"IT-A-RED": "in"}, FakeSettings(), vmeta=vmeta,
+        )
+        d = reqs[0]["data"]
+        self.assertEqual(d["title"], "Silicone Case")
+        self.assertEqual(d["item_group_id"], "IT-A")
+        self.assertNotIn("color", d)
+
+    def test_variant_model_grouping_and_color(self):
+        # per-model grouping: title = template + model, group = slug(template_model), color set
+        vmeta = {"IT-A-RED": {"template_name": "Silicone Case", "group_val": "iPhone 13", "color": "Rojo"}}
+        reqs, _ = _run(
+            [_leaf("IT-A-RED", variant_of="IT-A")],
+            {"IT-A-RED": 50.0}, {"IT-A-RED": "in"},
+            FakeSettings(variant_group_attribute="Modelos Celulares", variant_color_attribute="Color"),
+            vmeta=vmeta,
+        )
+        d = reqs[0]["data"]
+        self.assertEqual(d["title"], "Silicone Case iPhone 13")
+        self.assertEqual(d["item_group_id"], "IT_A_iPhone_13")
+        self.assertEqual(d["color"], "Rojo")
 
     def test_markup_applied(self):
         reqs, _ = _run([_leaf("IT-A")], {"IT-A": 100.0}, {"IT-A": "in"}, FakeSettings(price_markup_percent=10))

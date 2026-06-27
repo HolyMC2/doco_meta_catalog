@@ -27,6 +27,7 @@ Whitelisted (Desk):
 from __future__ import annotations
 
 import json
+import re
 
 import frappe
 import requests
@@ -106,6 +107,51 @@ def _eligible_leaves(item_codes: list[str] | None = None) -> list[dict]:
     return leaves
 
 
+# ---------------- variant grouping ----------------
+
+
+def _slug(s: str) -> str:
+    return re.sub(r"\W+", "_", s).strip("_")[:100]
+
+
+def _variant_meta(leaves: list[dict], settings) -> dict:
+    """For variant leaves, resolve {code: {template_name, group_val, color}} used to build a clean
+    Meta variant group. `group_val` (e.g. the phone model) splits one ERPNext template into
+    per-model Meta products so a 1000-variant template is not one giant group; `color` becomes the
+    Meta variant option. Both source attributes are CONFIGURABLE (variant_group_attribute /
+    variant_color_attribute) so this stays vertical-neutral — blank → group by template only."""
+    variants = [l for l in leaves if l.get("variant_of")]
+    if not variants:
+        return {}
+    names = [l["name"] for l in variants]
+    templates = {l["variant_of"] for l in variants}
+    tmpl_names = {
+        r["name"]: r["item_name"]
+        for r in frappe.get_all("Item", filters={"name": ["in", list(templates)]}, fields=["name", "item_name"])
+    }
+    group_attr = (getattr(settings, "variant_group_attribute", None) or "").strip()
+    color_attr = (getattr(settings, "variant_color_attribute", None) or "").strip()
+    wanted = [a for a in (group_attr, color_attr) if a]
+    attr_map: dict = {}
+    if wanted:
+        for r in frappe.get_all(
+            "Item Variant Attribute",
+            filters={"parent": ["in", names], "attribute": ["in", wanted]},
+            fields=["parent", "attribute", "attribute_value"],
+            limit_page_length=0,
+        ):
+            attr_map.setdefault(r["parent"], {})[r["attribute"]] = (r["attribute_value"] or "").strip()
+    out = {}
+    for l in variants:
+        a = attr_map.get(l["name"], {})
+        out[l["name"]] = {
+            "template_name": tmpl_names.get(l["variant_of"]),
+            "group_val": a.get(group_attr) if group_attr else None,
+            "color": a.get(color_attr) if color_attr else None,
+        }
+    return out
+
+
 # ---------------- payload mapping ----------------
 
 
@@ -159,6 +205,7 @@ def _build_payloads(item_codes: list[str] | None, settings) -> tuple[list[dict],
     base_url = (settings.image_url_base or get_url()).rstrip("/")
     # staging = synced to the catalog but NOT shown on public FB/IG (review-first); published = live.
     default_visibility = settings.default_visibility or "staging"
+    vmeta = _variant_meta(leaves, settings)  # clean per-template (+ optional per-model) variant groups
 
     reqs: list[dict] = []
     skipped: list[dict] = []
@@ -176,9 +223,20 @@ def _build_payloads(item_codes: list[str] | None, settings) -> tuple[list[dict],
         if not img:
             skipped.append({"code": code, "reason": "no public image (private/signed/missing, no fallback)"})
             continue
+        # variant title/group: name the group after the TEMPLATE (+ optional model split) so a
+        # template's variants don't surface under one variant's name; color = the variant option.
+        vm = vmeta.get(code) or {}
+        if it.get("variant_of"):
+            base = vm.get("template_name") or it.get("item_name") or code
+            gval = vm.get("group_val")
+            title = f"{base} {gval}".strip() if gval else base
+            group_id = _slug(f"{it['variant_of']}_{gval}") if gval else it["variant_of"]
+        else:
+            title = it.get("item_name") or code
+            group_id = None
         data = {
             "id": code,  # retailer_id == ERPNext item_code
-            "title": (it.get("item_name") or code)[:_TITLE_MAX],
+            "title": title[:_TITLE_MAX],
             "description": (strip_html_tags(it.get("description") or "") or it.get("item_name") or code)[:_DESC_MAX],
             "availability": _availability(levels.get(code, "out")),
             "condition": ov.get("condition") or settings.default_condition or "new",
@@ -188,8 +246,10 @@ def _build_payloads(item_codes: list[str] | None, settings) -> tuple[list[dict],
             "brand": it.get("brand") or settings.default_brand or "",
             "visibility": ov.get("visibility") or default_visibility,
         }
-        if it.get("variant_of"):
-            data["item_group_id"] = it["variant_of"]  # group a template's variants together
+        if group_id:
+            data["item_group_id"] = group_id  # group a template's variants (per model when configured)
+        if vm.get("color"):
+            data["color"] = vm["color"]  # Meta variant option
         if ov.get("google_product_category"):
             data["google_product_category"] = ov["google_product_category"]
         reqs.append({"method": "UPDATE", "data": data})

@@ -27,6 +27,9 @@
   "fallback_image_url",
   "section_break_category",
   "category_map",
+  "section_break_variants",
+  "variant_group_attribute",
+  "variant_color_attribute",
   "section_break_status",
   "last_full_reconcile",
   "last_full_reconcile_status",
@@ -171,6 +174,24 @@
    "fieldtype": "Table",
    "label": "Item Group Category Map",
    "options": "Meta Catalog Category Map"
+  },
+  {
+   "fieldname": "section_break_variants",
+   "fieldtype": "Section Break",
+   "label": "Variant Grouping",
+   "description": "How a template's variants are grouped into Meta products. Blank = one product per template (named after the template)."
+  },
+  {
+   "fieldname": "variant_group_attribute",
+   "fieldtype": "Data",
+   "label": "Group-By Attribute",
+   "description": "Item Attribute that splits a template into separate Meta products, e.g. 'Modelos Celulares' -> one product per phone model (title becomes 'Template Model'). Blank = one product per template."
+  },
+  {
+   "fieldname": "variant_color_attribute",
+   "fieldtype": "Data",
+   "label": "Color / Option Attribute",
+   "description": "Item Attribute mapped to Meta's variant option, e.g. 'Color'. Blank = no variant option."
   },
   {
    "fieldname": "section_break_status",
