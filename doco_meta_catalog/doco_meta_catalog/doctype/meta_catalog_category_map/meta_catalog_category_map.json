@@ -1,0 +1,52 @@
+{
+ "actions": [],
+ "creation": "2026-06-26 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "item_group",
+  "condition",
+  "google_product_category"
+ ],
+ "fields": [
+  {
+   "fieldname": "item_group",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Item Group",
+   "options": "Item Group",
+   "reqd": 1,
+   "columns": 4
+  },
+  {
+   "fieldname": "condition",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Condition",
+   "options": "\nnew\nrefurbished\nused\nused_like_new\nused_good\nused_fair",
+   "columns": 3,
+   "description": "Facebook product condition for items in this group."
+  },
+  {
+   "fieldname": "google_product_category",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Google Product Category",
+   "columns": 4,
+   "description": "Optional google_product_category id or path (e.g. 267 = Electronics > Communications > Telephony > Mobile Phones)."
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-06-26 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Doco Meta Catalog",
+ "name": "Meta Catalog Category Map",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

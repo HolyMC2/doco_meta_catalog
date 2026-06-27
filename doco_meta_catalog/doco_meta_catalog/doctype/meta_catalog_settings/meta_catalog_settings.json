@@ -23,6 +23,8 @@
   "section_break_image",
   "image_url_base",
   "fallback_image_url",
+  "section_break_category",
+  "category_map",
   "section_break_status",
   "last_full_reconcile",
   "last_full_reconcile_status",
@@ -116,14 +118,14 @@
    "fieldname": "price_markup_percent",
    "fieldtype": "Percent",
    "label": "Price Markup %",
-   "description": "Optional positive percent added to Item standard_rate before publishing (e.g. 10 = sell on Meta at 10% above ERPNext price)."
+   "description": "Optional positive percent added to the REAL selling price (Item Price in the selling price list) before publishing. Default 0 = Meta price matches the live shop exactly."
   },
   {
    "default": "1",
    "fieldname": "sync_only_website_items",
    "fieldtype": "Check",
-   "label": "Sync Only Website Items",
-   "description": "If on, only Item rows with show_in_website=1 (or with a Website Item record) are pushed. If off, every Item flows. Recommended ON to keep internal SKUs out of the customer-facing catalog."
+   "label": "Sync Only Website Items (deprecated)",
+   "description": "DEPRECATED / no-op. The catalog now always mirrors the storefront gate (Item.publish_on_web=1 AND not disabled), so this flag is ignored. Kept only to avoid a data migration; remove in a later cleanup."
   },
   {
    "fieldname": "section_break_image",
@@ -141,6 +143,18 @@
    "fieldtype": "Data",
    "label": "Fallback Image URL",
    "description": "Used when an Item has no image. Public HTTPS PNG/JPG, square aspect ratio recommended (max 8 MB)."
+  },
+  {
+   "fieldname": "section_break_category",
+   "fieldtype": "Section Break",
+   "label": "Category & Condition Mapping",
+   "description": "Optional. Map an Item Group to a Facebook condition (e.g. Seminuevos -> refurbished) and/or a google_product_category. Items in unmapped groups use the Default Condition above."
+  },
+  {
+   "fieldname": "category_map",
+   "fieldtype": "Table",
+   "label": "Item Group Category Map",
+   "options": "Meta Catalog Category Map"
   },
   {
    "fieldname": "section_break_status",

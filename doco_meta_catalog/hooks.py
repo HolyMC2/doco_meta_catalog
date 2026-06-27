@@ -4,7 +4,9 @@ app_publisher = "Doco México"
 app_description = "Sync ERPNext Items into Meta Commerce Catalog"
 app_email = "doco.mexico@gmail.com"
 app_license = "mit"
-required_apps = ["frappe", "erpnext", "frappe_whatsapp"]
+# doco is the shared core: storefront publish gate / Item Price / Bin / image guard are
+# reused from doco.docoutils.storefront so the Meta catalog == the live web shop.
+required_apps = ["frappe", "erpnext", "frappe_whatsapp", "doco"]
 
 doc_events = {
     "Item": {
