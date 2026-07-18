@@ -44,10 +44,11 @@ def _leaf(name, **kw):
         "brand": kw.get("brand", ""),
         "variant_of": kw.get("variant_of", None),
         "stock_uom": kw.get("stock_uom", "Nos"),
+        "default_manufacturer_part_no": kw.get("default_manufacturer_part_no", None),
     }
 
 
-def _run(leaves, prices, levels, settings, image_pass=True, vmeta=None):
+def _run(leaves, prices, levels, settings, image_pass=True, vmeta=None, gtins=None):
     """Drive _build_payloads with patched storefront helpers. ``image_pass`` simulates the
     storefront image guard: True → echo the raw path (public), False → None (private/signed).
     ``vmeta`` overrides the variant-metadata resolver (default {} → group by template)."""
@@ -56,6 +57,7 @@ def _run(leaves, prices, levels, settings, image_pass=True, vmeta=None):
          patch.object(sync.sf, "_selling_price_list", return_value="Standard Selling"), \
          patch.object(sync.sf, "_prices", return_value=prices), \
          patch.object(sync.sf, "_stock_levels", return_value=levels), \
+         patch.object(sync.sf, "_feed_gtins", return_value=(gtins or {})), \
          patch.object(sync.sf, "_image_url", side_effect=lambda raw: raw if image_pass else None):
         return sync._build_payloads(None, settings)
 
@@ -202,6 +204,29 @@ class TestBuildPayloads(unittest.TestCase):
         with patch.object(sync.frappe, "get_all", side_effect=fake_get_all):
             out = sync._eligible_leaves(["V1", "V2", "S1"])
         self.assertEqual({l["name"] for l in out}, {"V1", "S1"})  # V2 dropped: T2 unpublished
+
+    def test_gtin_and_mpn_emitted(self):
+        # §19.3: a valid native GTIN + trimmed manufacturer part number ride the Meta payload,
+        # matching the RSS feed's g:gtin / g:mpn so the channels don't diverge.
+        reqs, _ = _run(
+            [_leaf("IT-A", default_manufacturer_part_no="AB-123 ")],
+            {"IT-A": 100.0}, {"IT-A": "in"}, FakeSettings(),
+            gtins={"IT-A": "07501234567890"},
+        )
+        d = reqs[0]["data"]
+        self.assertEqual(d["gtin"], "07501234567890")
+        self.assertEqual(d["mpn"], "AB-123")  # whitespace trimmed
+
+    def test_invalid_gtin_and_blank_mpn_omitted(self):
+        # 10-digit is not a valid GTIN length (edge regex ^(\d{8}|\d{12,14})$) → dropped; a blank
+        # mpn is omitted rather than sent empty (Meta rejects empty unique identifiers).
+        reqs, _ = _run(
+            [_leaf("IT-A")], {"IT-A": 100.0}, {"IT-A": "in"}, FakeSettings(),
+            gtins={"IT-A": "1234567890"},
+        )
+        d = reqs[0]["data"]
+        self.assertNotIn("gtin", d)
+        self.assertNotIn("mpn", d)
 
     def test_excluded_group_skipped(self):
         cmap = [{"item_group": "Negociable", "exclude": 1}]

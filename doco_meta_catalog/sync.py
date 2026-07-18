@@ -78,7 +78,8 @@ def _group_overrides(settings) -> dict:
 
 # ---------------- eligibility (mirror the storefront gate) ----------------
 
-_LEAF_FIELDS = ["name", "item_name", "description", "item_group", "image", "brand", "variant_of", "stock_uom"]
+_LEAF_FIELDS = ["name", "item_name", "description", "item_group", "image", "brand", "variant_of", "stock_uom",
+                "default_manufacturer_part_no"]
 
 
 def _eligible_leaves(item_codes: list[str] | None = None) -> list[dict]:
@@ -195,6 +196,9 @@ def _build_payloads(item_codes: list[str] | None, settings) -> tuple[list[dict],
         return [], []
 
     names = [it["name"] for it in leaves]
+    # §19.3 marketing-channel identifiers — reuse the storefront's EXACT GTIN resolution (native
+    # Item Barcode rows) so FB/IG/Google carry the same g:gtin the RSS feed emits (no divergence).
+    gtins = sf._feed_gtins(names)
     price_list = sf._selling_price_list()
     prices = sf._prices(names, price_list)
     levels = sf._stock_levels(names)  # 'out' | 'low' | 'in'; services always 'in'
@@ -255,6 +259,14 @@ def _build_payloads(item_codes: list[str] | None, settings) -> tuple[list[dict],
             # MA-9: item_group as product_type so Meta Product Sets can auto-curate by group.
             "product_type": it.get("item_group") or "",
         }
+        # gtin/mpn: same native sources + edge regex the storefront feed uses, so the two channels
+        # carry identical identifiers. Meta 'gtin'/'mpn' are optional; omit rather than send empties.
+        g = gtins.get(code, "")
+        if g and re.fullmatch(r"\d{8}|\d{12,14}", g):
+            data["gtin"] = g
+        mpn = str(it.get("default_manufacturer_part_no") or "").strip()[:70]
+        if mpn:
+            data["mpn"] = mpn
         if group_id:
             data["item_group_id"] = group_id  # group a template's variants (per model when configured)
         if vm.get("color"):
