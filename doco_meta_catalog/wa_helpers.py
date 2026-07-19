@@ -18,6 +18,8 @@ import re
 
 import frappe
 from frappe import _
+
+from doco_meta_catalog.utils import assert_outbound_allowed
 import requests
 
 # Reuse the storefront's per-IP + global rate limiter so a single compromised / low-priv
@@ -76,6 +78,7 @@ def _outgoing_account():
 
 
 def _post_message(account, payload):
+    assert_outbound_allowed()
     url = f"{account.url.rstrip('/')}/{account.version}/{account.phone_id}/messages"
     tok = account.get_password("token", raise_exception=False)
     r = requests.post(

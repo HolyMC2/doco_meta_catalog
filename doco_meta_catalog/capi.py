@@ -22,6 +22,8 @@ import frappe
 import requests
 from frappe.utils import flt
 
+from doco_meta_catalog.utils import assert_outbound_allowed
+
 _SETTINGS = "Meta Catalog Settings"
 
 
@@ -94,6 +96,7 @@ def emit(event_name: str, event_id: str, *, user_data: dict, custom_data: dict |
 
 def _post(event: dict):
     """Worker: POST one event to the dataset /events endpoint."""
+    assert_outbound_allowed()
     s = frappe.get_cached_doc(_SETTINGS)
     dataset = (s.get("capi_dataset_id") or "").strip()
     token = s.get_capi_token()

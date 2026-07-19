@@ -18,6 +18,7 @@ import requests
 from frappe.utils import now_datetime
 
 from doco_meta_catalog import sync
+from doco_meta_catalog.utils import assert_outbound_allowed
 
 _DOCTYPE = "Meta Product Set"
 
@@ -39,6 +40,7 @@ def build_filter(dimension: str, value: str) -> dict:
 def _sync_one(row, settings) -> str | None:
     """Create or update one Meta Product Set. POST to the catalog creates; POST to the
     set id updates in place. Returns the set id."""
+    assert_outbound_allowed()
     filt = build_filter(row.dimension, row.value)
     root = settings.get_graph_root()
     url = f"{root}/{row.meta_set_id}" if row.get("meta_set_id") else f"{root}/{settings.catalog_id}/product_sets"

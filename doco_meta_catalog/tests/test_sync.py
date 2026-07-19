@@ -8,7 +8,7 @@ plus variant grouping and the category/condition override.
 """
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from doco_meta_catalog import sync
 
@@ -237,6 +237,38 @@ class TestBuildPayloads(unittest.TestCase):
         )
         self.assertEqual(reqs, [])
         self.assertEqual(skipped, [{"code": "IT-A", "reason": "item group excluded from Meta catalog"}])
+
+
+class TestOutboundGuard(unittest.TestCase):
+    """``meta_catalog_block_outbound``: a mirror site restored from prod carries the
+    LIVE catalog_id + token, so the guard must refuse BEFORE any bytes reach Meta."""
+
+    def test_flag_set_raises(self):
+        from doco_meta_catalog import utils
+
+        fake_frappe = MagicMock()
+        fake_frappe.conf.get.return_value = 1
+        fake_frappe.throw.side_effect = RuntimeError("blocked")
+        with patch.object(utils, "frappe", fake_frappe):
+            with self.assertRaises(RuntimeError):
+                utils.assert_outbound_allowed()
+        fake_frappe.conf.get.assert_called_once_with("meta_catalog_block_outbound")
+
+    def test_flag_unset_is_noop(self):
+        from doco_meta_catalog import utils
+
+        fake_frappe = MagicMock()
+        fake_frappe.conf.get.return_value = None
+        with patch.object(utils, "frappe", fake_frappe):
+            utils.assert_outbound_allowed()
+        fake_frappe.throw.assert_not_called()
+
+    def test_items_batch_guarded_before_network(self):
+        with patch.object(sync, "assert_outbound_allowed", side_effect=RuntimeError("blocked")), \
+             patch.object(sync.requests, "post") as post:
+            with self.assertRaises(RuntimeError):
+                sync._post_items_batch(FakeSettings(), [{"method": "UPDATE", "data": {"id": "X"}}])
+        post.assert_not_called()
 
 
 if __name__ == "__main__":

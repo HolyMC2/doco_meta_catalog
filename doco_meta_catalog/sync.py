@@ -33,6 +33,8 @@ import frappe
 import requests
 from frappe.utils import flt, get_url, strip_html_tags, today
 
+from doco_meta_catalog.utils import assert_outbound_allowed
+
 # The storefront module is the SINGLE SOURCE OF TRUTH for what is published, its real
 # selling price, live stock, and which images are safe to expose to an anonymous caller.
 # Reusing it (instead of re-deriving) guarantees the Meta catalog == the live shop.
@@ -318,6 +320,7 @@ def _sale_window() -> str | None:
 
 
 def _post_items_batch(settings, requests_payload):
+    assert_outbound_allowed()
     url = f"{settings.get_graph_root()}/{settings.catalog_id}/items_batch"
     token = settings.get_token()
     if not token:
