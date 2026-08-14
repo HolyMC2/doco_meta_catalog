@@ -98,7 +98,7 @@ whitelisted `dry_run()` to inspect the full payload + skip reasons WITHOUT posti
 
 1. **Meta Commerce Manager**: create Catalog of type "E-commerce", connect to existing WABA `2954965221375122`
 2. **System User**: add `catalog_management` scope to existing token via Business Settings → System Users → Add Asset → Catalogs
-3. **Install app on lab first**: `bench get-app https://github.com/HolyMC2/doco_meta_catalog && bench --site ventas.lab... install-app doco_meta_catalog`
+3. **Install app on the full retail integration mirror first**: verify the target with `list-apps`, then run the install through the local Docker Compose bench runner.
 4. **Configure Meta Catalog Settings** in Desk:
    - `catalog_id` = numeric ID from Commerce Manager
    - `whatsapp_account` = `Doco Ventas` (reuse token)
@@ -128,7 +128,7 @@ Standard Frappe app install flow. No frontend bundle to build.
 # Lab (after first commit to fork)
 cd ~/muelle-host/muelle
 docker compose exec -T backend bash -c \
-  "cd /home/frappe/frappe-bench && bench --site ventas.lab.xoloitzcuintles.com install-app doco_meta_catalog"
+  "cd /home/frappe/frappe-bench && bench --site doco-mirror.lab.xoloitzcuintles.com install-app doco_meta_catalog"
 
 # Prod (after lab verify)
 ssh contavm 'cd ~/muelle && docker compose exec -T backend bash -c \
@@ -142,7 +142,7 @@ ssh contavm 'cd ~/muelle && docker compose exec -T backend bash -c \
 - [x] Installed on prod `ventas.docomexico.com` (2026-06-26), `enabled=0`
 - [ ] **Marco**: create Meta Commerce Catalog (E-commerce) → set `catalog_id` + token-with-`catalog_management`-scope (reuse WhatsApp Account or direct `access_token`)
 - [ ] First test: controlled 2-item push via `sync._build_payloads([..], s)` + `_post_items_batch` (ignores `enabled` gate — pushes without arming hooks); verify in Commerce Manager
-- [ ] Go-live: flip `enabled=1`, run `sync_all_now`; restart `backend queue-short queue-long scheduler` if on-edit pushes don't fire
+- [ ] Go-live: flip `enabled=1`, run `sync_all_now`; use the coordinated Muelle restart script if on-edit pushes don't fire
 - [ ] Optional: set `fallback_image_url` to also publish priced-but-photoless items (≈519 lab / part of 1,992 prod skipped)
 - [ ] Populate `category_map` (e.g. `Seminuevos → refurbished`) once catalog is live
 - [ ] Test product_list interactive message + verify cart payload arrives in webhook
