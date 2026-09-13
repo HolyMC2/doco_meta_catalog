@@ -1,0 +1,85 @@
+# doco_meta_catalog CI.
+#
+# Until 2026-09-12 this repo had no CI at all (logging audit G18: nine repos
+# with none). The app pushes ERPNext Items into the Meta Commerce Catalog that
+# backs the WhatsApp catalog, the Facebook shop and Instagram Shopping, so a
+# NameError on a sync branch is a price or a stock state that customers see and
+# nobody here does.
+#
+# The scope is deliberately small and honest, and there is NO test step. That is
+# not for lack of tests — all three (`test_inbound.py`, `test_sync.py`,
+# `test_wa_helpers.py`) already mock the Meta HTTP calls and would run on a
+# runner. They cannot be collected because the app hard-imports a sibling app at
+# module top:
+#
+#     doco_meta_catalog/sync.py:42        from doco.docoutils import storefront as sf
+#     doco_meta_catalog/wa_helpers.py:27  from doco.docoutils import storefront as _sf
+#
+# A frappe stub does not help — the missing module is `doco`, a whole Frappe app,
+# and stubbing a storefront seam would mean asserting against the stub. Two
+# honest ways out, both bigger than this file: check `doco` out alongside (as
+# mercado's ci.yml does for scanner-kit, which needs cross-repo checkout access
+# this workflow does not claim), or move the two imports inside the functions
+# that use them so the modules import standalone. Until then, this gate claims
+# only what it proves:
+#
+#   1. ruff restricted to the classes that are always bugs — syntax errors,
+#      undefined names, f-string and assert mistakes. This selection is the one
+#      that earned its place: it is how `posawesome.set_batch_nos_for_bundels`
+#      and `get_language_info._validate_language_code` were caught this week,
+#      both live NameErrors no test had reached.
+#   2. `compileall`, so a file that ruff parses but CPython 3.14 refuses cannot
+#      reach a bench.
+#
+# The suite stays where it can be true — on the lab, against the retail mirror:
+#
+#   cd ~/muelle-host/muelle
+#   docker compose exec -T backend bench \
+#       --site doco-mirror.lab.xoloitzcuintles.com run-tests \
+#       --app doco_meta_catalog
+#
+# No `paths:` filter on purpose — a required check that a path filter skips
+# reports nothing and blocks the merge forever.
+
+name: tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: ruff gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # The bench runs 3.14.2 (verified in the backend container 2026-09-12);
+      # CI must not pass on an interpreter production never executes.
+      # No `cache: pip` — ruff is not in pyproject.toml, so a hash-keyed cache
+      # would save nothing and add a way for the job to fail.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      # Pinned: an unpinned ruff adds rules on its own schedule and turns this
+      # gate red without a commit.
+      - name: Install tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff==0.14.14
+
+      - name: Ruff — syntax and undefined names
+        run: python -m ruff check --select E9,F63,F7,F82,F821 doco_meta_catalog
+
+      - name: Byte-compile the app
+        run: python -m compileall -q doco_meta_catalog
