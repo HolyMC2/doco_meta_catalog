@@ -87,11 +87,32 @@ def current_settings(doc):
 
 def graph_request(method, settings, edge, *, params=None, body=None):
     """Fixed Graph origin, no redirects, token outside URLs, bounded response."""
-    if edge not in {"items_batch", "check_batch_request_status", "products"}:
+    account_edges = {"whatsapp_catalogs", "whatsapp_phone", "whatsapp_commerce"}
+    if (
+        edge
+        not in {"items_batch", "check_batch_request_status", "products"} | account_edges
+    ):
         raise ValueError("graph_edge_invalid")
     identity = scope(settings)
-    version = json.loads(identity["scope_json"])["graph_version"]
-    url = f"{contract.graph_root(version)}/{identity['catalog_id']}/{edge}"
+    values = json.loads(identity["scope_json"])
+    version = values["graph_version"]
+    path = f"{identity['catalog_id']}/{edge}"
+    if edge in account_edges:
+        if method != "GET" or body is not None:
+            raise ValueError("graph_method_invalid")
+        account = values["account"]
+        object_id = account.get(
+            "business_id" if edge == "whatsapp_catalogs" else "phone_id", ""
+        )
+        if not re.fullmatch(r"[0-9]{1,40}", str(object_id)):
+            raise ValueError("catalog_account_unavailable")
+        suffix = {
+            "whatsapp_catalogs": "/product_catalogs",
+            "whatsapp_phone": "",
+            "whatsapp_commerce": "/whatsapp_commerce_settings",
+        }[edge]
+        path = str(object_id) + suffix
+    url = f"{contract.graph_root(version)}/{path}"
     token = settings.get_token()
     if not token:
         raise ValueError("catalog_token_unavailable")

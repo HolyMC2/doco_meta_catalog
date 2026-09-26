@@ -124,7 +124,7 @@ def _account(conversation):
 
 
 def get_context(conversation):
-    from doco_meta_catalog import orders
+    from doco_meta_catalog import connection, orders
 
     result = {
         "available": False, "reason_code": "", "capabilities": dict.fromkeys(sorted(KINDS), False),
@@ -141,7 +141,8 @@ def get_context(conversation):
         return result
     _account(conversation)
     result.update({"available": True, "catalog_id": settings.catalog_id,
-                   "account_name": conversation.account_record, "capabilities": dict.fromkeys(sorted(KINDS), True)})
+                   "account_name": conversation.account_record, "capabilities": dict.fromkeys(sorted(KINDS), True),
+                   "connection": connection.latest(settings)})
     return result
 
 

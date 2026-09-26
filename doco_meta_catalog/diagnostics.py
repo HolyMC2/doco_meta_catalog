@@ -5,7 +5,14 @@ from __future__ import annotations
 import frappe
 from frappe.utils import now_datetime
 
-from doco_meta_catalog import publication, publication_contract as contract, sync
+from doco_meta_catalog import (
+    connection,
+    publication,
+    sync,
+)
+from doco_meta_catalog import (
+    publication_contract as contract,
+)
 
 _DOCTYPE = "Meta Catalog Diagnostic"
 _FIELDS = "retailer_id,review_status,capability_to_review_status,errors,price,currency,availability,visibility"
@@ -134,6 +141,7 @@ def run_diagnostics(store=1):
         "account_name": identity["account_name"],
         "scope_revision": identity["scope_revision"],
         "checked_at": str(now_datetime()),
+        "connection": connection.observe(settings),
     }
     if int(store):
         run = publication.mark(
