@@ -5,17 +5,42 @@
  "engine": "InnoDB",
  "field_order": [
   "wa_msg_id",
-  "sales_order"
+  "sales_order",
+  "intake_key",
+  "identity_state",
+  "state",
+  "receipt",
+  "provider",
+  "app_id",
+  "account_id",
+  "business_id",
+  "whatsapp_account",
+  "peer_id",
+  "conversation",
+  "wa_message",
+  "catalog_id",
+  "raw_order",
+  "raw_order_hash",
+  "reason_code",
+  "review_token",
+  "review_snapshot",
+  "reviewed_by",
+  "reviewed_at",
+  "customer",
+  "company",
+  "warehouse",
+  "deal",
+  "create_request"
  ],
  "fields": [
   {
    "fieldname": "wa_msg_id",
-   "fieldtype": "Data",
+   "fieldtype": "Small Text",
    "label": "WhatsApp Message ID",
-   "unique": 1,
    "reqd": 1,
    "in_list_view": 1,
-   "description": "The inbound WhatsApp order message id. UNIQUE — the DB index is the atomic idempotency guard (a claim-by-insert blocks concurrent Meta retries)."
+   "description": "Original provider message ID. Identity is scoped by the authenticated receipt key.",
+   "read_only": 1
   },
   {
    "fieldname": "sales_order",
@@ -24,6 +49,169 @@
    "options": "Sales Order",
    "read_only": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "intake_key",
+   "fieldtype": "Data",
+   "label": "Receipt-scoped identity",
+   "read_only": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "identity_state",
+   "fieldtype": "Select",
+   "label": "Identity state",
+   "read_only": 1,
+   "options": "account_unknown\nverified",
+   "default": "account_unknown"
+  },
+  {
+   "fieldname": "state",
+   "fieldtype": "Select",
+   "label": "State",
+   "read_only": 1,
+   "options": "Legacy\nNeeds Review\nReviewed\nOrdered",
+   "default": "Legacy",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "receipt",
+   "fieldtype": "Link",
+   "label": "Webhook receipt",
+   "read_only": 1,
+   "options": "Meta Webhook Receipt"
+  },
+  {
+   "fieldname": "provider",
+   "fieldtype": "Data",
+   "label": "Provider",
+   "read_only": 1
+  },
+  {
+   "fieldname": "app_id",
+   "fieldtype": "Data",
+   "label": "Meta app ID",
+   "read_only": 1
+  },
+  {
+   "fieldname": "account_id",
+   "fieldtype": "Data",
+   "label": "Phone account ID",
+   "read_only": 1
+  },
+  {
+   "fieldname": "business_id",
+   "fieldtype": "Data",
+   "label": "Business ID",
+   "read_only": 1
+  },
+  {
+   "fieldname": "whatsapp_account",
+   "fieldtype": "Link",
+   "label": "WhatsApp account",
+   "read_only": 1,
+   "options": "WhatsApp Account"
+  },
+  {
+   "fieldname": "peer_id",
+   "fieldtype": "Data",
+   "label": "Customer peer",
+   "read_only": 1
+  },
+  {
+   "fieldname": "conversation",
+   "fieldtype": "Data",
+   "label": "Conversation identity",
+   "read_only": 1
+  },
+  {
+   "fieldname": "wa_message",
+   "fieldtype": "Link",
+   "label": "WhatsApp message",
+   "read_only": 1,
+   "options": "WhatsApp Message"
+  },
+  {
+   "fieldname": "catalog_id",
+   "fieldtype": "Data",
+   "label": "Requested catalog",
+   "read_only": 1
+  },
+  {
+   "fieldname": "raw_order",
+   "fieldtype": "Long Text",
+   "label": "Original order payload",
+   "read_only": 1
+  },
+  {
+   "fieldname": "raw_order_hash",
+   "fieldtype": "Data",
+   "label": "Original order fingerprint",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reason_code",
+   "fieldtype": "Data",
+   "label": "Reason",
+   "read_only": 1
+  },
+  {
+   "fieldname": "review_token",
+   "fieldtype": "Data",
+   "label": "Review token",
+   "read_only": 1
+  },
+  {
+   "fieldname": "review_snapshot",
+   "fieldtype": "Long Text",
+   "label": "Reviewed snapshot",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reviewed_by",
+   "fieldtype": "Link",
+   "label": "Reviewed by",
+   "read_only": 1,
+   "options": "User"
+  },
+  {
+   "fieldname": "reviewed_at",
+   "fieldtype": "Datetime",
+   "label": "Reviewed at",
+   "read_only": 1
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "label": "Selected customer",
+   "read_only": 1,
+   "options": "Customer"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Selected company",
+   "read_only": 1,
+   "options": "Company"
+  },
+  {
+   "fieldname": "warehouse",
+   "fieldtype": "Link",
+   "label": "Selected warehouse",
+   "read_only": 1,
+   "options": "Warehouse"
+  },
+  {
+   "fieldname": "deal",
+   "fieldtype": "Data",
+   "label": "Selected opportunity",
+   "read_only": 1
+  },
+  {
+   "fieldname": "create_request",
+   "fieldtype": "Data",
+   "label": "Create request ID",
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 0,
@@ -33,19 +221,10 @@
  "module": "Doco Meta Catalog",
  "name": "Meta Order Log",
  "owner": "Administrator",
- "permissions": [
-  {
-   "create": 1,
-   "delete": 1,
-   "email": 1,
-   "print": 1,
-   "read": 1,
-   "role": "System Manager",
-   "share": 1,
-   "write": 1
-  }
- ],
+ "permissions": [],
  "sort_field": "modified",
  "sort_order": "DESC",
- "states": []
+ "states": [],
+ "allow_rename": 0,
+ "track_changes": 0
 }

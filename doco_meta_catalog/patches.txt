@@ -1,2 +1,3 @@
 doco_meta_catalog.patches.remove_catalog_app_secret
 doco_meta_catalog.patches.add_ctwa_custom_fields
+doco_meta_catalog.patches.account_scope_order_logs

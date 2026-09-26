@@ -1,0 +1,145 @@
+{
+ "doctype": "DocType",
+ "name": "Meta Catalog Publication",
+ "module": "Doco Meta Catalog",
+ "engine": "InnoDB",
+ "autoname": "hash",
+ "field_order": [
+  "catalog_id",
+  "account_name",
+  "scope_revision",
+  "scope_json",
+  "request_id",
+  "request_hash",
+  "request_body",
+  "items",
+  "state",
+  "reason_code",
+  "handles",
+  "evidence",
+  "submitted_at",
+  "lease_until",
+  "polled_at",
+  "poll_attempts",
+  "poll_complete",
+  "http_status",
+  "reconciles"
+ ],
+ "fields": [
+  {
+   "fieldname": "catalog_id",
+   "label": "Catalog Id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "account_name",
+   "label": "Account Name",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "scope_revision",
+   "label": "Scope Revision",
+   "fieldtype": "Data",
+   "search_index": 1
+  },
+  {
+   "fieldname": "scope_json",
+   "label": "Scope Json",
+   "fieldtype": "Long Text"
+  },
+  {
+   "fieldname": "request_id",
+   "label": "Request Id",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "request_hash",
+   "label": "Request Hash",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "request_body",
+   "label": "Request Body",
+   "fieldtype": "Long Text"
+  },
+  {
+   "fieldname": "items",
+   "label": "Items",
+   "fieldtype": "Table",
+   "options": "Meta Catalog Publication Item"
+  },
+  {
+   "fieldname": "state",
+   "label": "State",
+   "fieldtype": "Select",
+   "options": "Queued\nSubmitting\nPending\nProcessed\nRejected\nUnknown\nBlocked",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "reason_code",
+   "label": "Reason Code",
+   "fieldtype": "Data",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "handles",
+   "label": "Handles",
+   "fieldtype": "Long Text"
+  },
+  {
+   "fieldname": "evidence",
+   "label": "Evidence",
+   "fieldtype": "Long Text"
+  },
+  {
+   "fieldname": "submitted_at",
+   "label": "Submitted At",
+   "fieldtype": "Datetime"
+  },
+  {
+   "fieldname": "lease_until",
+   "label": "Lease Until",
+   "fieldtype": "Datetime"
+  },
+  {
+   "fieldname": "polled_at",
+   "label": "Polled At",
+   "fieldtype": "Datetime"
+  },
+  {
+   "fieldname": "poll_attempts",
+   "label": "Poll Attempts",
+   "fieldtype": "Int"
+  },
+  {
+   "fieldname": "poll_complete",
+   "label": "Poll Complete",
+   "fieldtype": "Check"
+  },
+  {
+   "fieldname": "http_status",
+   "label": "Http Status",
+   "fieldtype": "Int"
+  },
+  {
+   "fieldname": "reconciles",
+   "label": "Reconciles uncertain publication",
+   "fieldtype": "Link",
+   "options": "Meta Catalog Publication"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "track_changes": 0
+}

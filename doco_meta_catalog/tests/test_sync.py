@@ -54,11 +54,12 @@ def _run(leaves, prices, levels, settings, image_pass=True, vmeta=None, gtins=No
     ``vmeta`` overrides the variant-metadata resolver (default {} → group by template)."""
     with patch.object(sync, "_eligible_leaves", return_value=leaves), \
          patch.object(sync, "_variant_meta", return_value=(vmeta or {})), \
-         patch.object(sync.sf, "_selling_price_list", return_value="Standard Selling"), \
-         patch.object(sync.sf, "_prices", return_value=prices), \
+         patch("doco_meta_catalog.catalog_pricing.quote", return_value={"base_rates": prices}), \
          patch.object(sync.sf, "_stock_levels", return_value=levels), \
          patch.object(sync.sf, "_feed_gtins", return_value=(gtins or {})), \
-         patch.object(sync.sf, "_image_url", side_effect=lambda raw: raw if image_pass else None):
+         patch("doco.docoutils.storefront._common._image_urls", side_effect=lambda raws, **kw: {
+             raw: raw if image_pass or raw == settings.fallback_image_url else None for raw in raws
+         }):
         return sync._build_payloads(None, settings)
 
 
@@ -265,7 +266,7 @@ class TestOutboundGuard(unittest.TestCase):
 
     def test_items_batch_guarded_before_network(self):
         with patch.object(sync, "assert_outbound_allowed", side_effect=RuntimeError("blocked")), \
-             patch.object(sync.requests, "post") as post:
+             patch("doco_meta_catalog.publication.graph_request") as post:
             with self.assertRaises(RuntimeError):
                 sync._post_items_batch(FakeSettings(), [{"method": "UPDATE", "data": {"id": "X"}}])
         post.assert_not_called()

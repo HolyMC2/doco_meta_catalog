@@ -1,0 +1,88 @@
+{
+ "doctype": "DocType",
+ "name": "Meta Catalog Diagnostic Run",
+ "module": "Doco Meta Catalog",
+ "engine": "InnoDB",
+ "autoname": "hash",
+ "field_order": [
+  "catalog_id",
+  "account_name",
+  "scope_revision",
+  "scope_json",
+  "state",
+  "reason_code",
+  "checked_at",
+  "pages",
+  "observed_count",
+  "summary"
+ ],
+ "fields": [
+  {
+   "fieldname": "catalog_id",
+   "label": "Catalog Id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "account_name",
+   "label": "Account Name",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "scope_revision",
+   "label": "Scope Revision",
+   "fieldtype": "Data",
+   "search_index": 1
+  },
+  {
+   "fieldname": "scope_json",
+   "label": "Scope Json",
+   "fieldtype": "Long Text"
+  },
+  {
+   "fieldname": "state",
+   "label": "State",
+   "fieldtype": "Select",
+   "options": "Complete\nPartial\nUnknown",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "reason_code",
+   "label": "Reason Code",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "checked_at",
+   "label": "Checked At",
+   "fieldtype": "Datetime",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "pages",
+   "label": "Pages",
+   "fieldtype": "Int"
+  },
+  {
+   "fieldname": "observed_count",
+   "label": "Observed Count",
+   "fieldtype": "Int"
+  },
+  {
+   "fieldname": "summary",
+   "label": "Summary",
+   "fieldtype": "Long Text"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "track_changes": 0
+}

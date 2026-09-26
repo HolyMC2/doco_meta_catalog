@@ -26,11 +26,10 @@ Whitelisted (Desk):
 
 from __future__ import annotations
 
-import json
 import re
+from urllib.parse import quote as urlquote, urlsplit
 
 import frappe
-import requests
 from frappe.utils import flt, get_url, strip_html_tags, today
 
 from doco_meta_catalog.utils import assert_outbound_allowed
@@ -54,7 +53,7 @@ _BATCH_CHUNK = 1000  # Meta items_batch hard limit ~5000; smaller keeps payload 
 def _get_settings():
     """Active settings, or None when the master gate is off / no catalog wired.
     Hooks + workers short-circuit on None → zero side effects when not configured."""
-    s = frappe.get_cached_doc(SETTINGS_DOCTYPE)
+    s = frappe.get_doc(SETTINGS_DOCTYPE)
     if not s.enabled or not s.catalog_id:
         return None
     return s
@@ -84,7 +83,7 @@ _LEAF_FIELDS = ["name", "item_name", "description", "item_group", "image", "bran
                 "default_manufacturer_part_no"]
 
 
-def _eligible_leaves(item_codes: list[str] | None = None) -> list[dict]:
+def _eligible_leaves(item_codes: list[str] | None = None, *, lock=False) -> list[dict]:
     """Published, sellable LEAF items (``has_variants=0``) — the same universe the storefront
     sells. Variant leaves ARE included (each a real sellable Item with its own Bin + Item
     Price); they group on Meta via ``item_group_id``. Templates are excluded."""
@@ -93,7 +92,7 @@ def _eligible_leaves(item_codes: list[str] | None = None) -> list[dict]:
         if not item_codes:
             return []
         filters["name"] = ["in", item_codes]
-    leaves = frappe.get_all("Item", filters=filters, fields=_LEAF_FIELDS, limit_page_length=0)
+    leaves = frappe.get_all("Item", filters=filters, fields=_LEAF_FIELDS, limit_page_length=0, for_update=lock)
     # A variant inherits a COPY of publish_on_web from its template; if the template is later
     # unpublished/disabled that copy can go stale. Mirror the storefront: a variant is sellable
     # only while its TEMPLATE is published — keeps catalog == web shop and blocks orphaned variants.
@@ -104,6 +103,7 @@ def _eligible_leaves(item_codes: list[str] | None = None) -> list[dict]:
                 "Item",
                 filters={"name": ["in", list(templates)], "publish_on_web": 1, "disabled": 0},
                 pluck="name",
+                for_update=lock,
             )
         )
         leaves = [l for l in leaves if not l.get("variant_of") or l.get("variant_of") in live]
@@ -117,7 +117,7 @@ def _slug(s: str) -> str:
     return re.sub(r"\W+", "_", s).strip("_")[:100]
 
 
-def _variant_meta(leaves: list[dict], settings) -> dict:
+def _variant_meta(leaves: list[dict], settings, *, lock=False) -> dict:
     """For variant leaves, resolve {code: {template_name, group_val, color}} used to build a clean
     Meta variant group. `group_val` (e.g. the phone model) splits one ERPNext template into
     per-model Meta products so a 1000-variant template is not one giant group; `color` becomes the
@@ -130,7 +130,7 @@ def _variant_meta(leaves: list[dict], settings) -> dict:
     templates = {l["variant_of"] for l in variants}
     tmpl_names = {
         r["name"]: r["item_name"]
-        for r in frappe.get_all("Item", filters={"name": ["in", list(templates)]}, fields=["name", "item_name"])
+        for r in frappe.get_all("Item", filters={"name": ["in", list(templates)]}, fields=["name", "item_name"], for_update=lock)
     }
     group_attr = (getattr(settings, "variant_group_attribute", None) or "").strip()
     color_attr = (getattr(settings, "variant_color_attribute", None) or "").strip()
@@ -142,6 +142,7 @@ def _variant_meta(leaves: list[dict], settings) -> dict:
             filters={"parent": ["in", names], "attribute": ["in", wanted]},
             fields=["parent", "attribute", "attribute_value"],
             limit_page_length=0,
+            for_update=lock,
         ):
             attr_map.setdefault(r["parent"], {})[r["attribute"]] = (r["attribute_value"] or "").strip()
     out = {}
@@ -173,44 +174,45 @@ def _format_price(amount, currency: str) -> str:
     return f"{flt(amount):.2f} {currency or 'MXN'}"
 
 
-def _public_image(item: dict, settings) -> str | None:
-    """Public HTTPS image Meta can scrape. Reuse the storefront guard (rejects ``/private``
-    and signed B2/S3 object URLs that 401 for an anonymous crawler), resolve a relative
-    ``/files`` path against ``image_url_base``, then fall back to the configured placeholder."""
-    raw = item.get("image")
-    safe = sf._image_url(raw) if raw else None
-    if safe:
-        if safe.startswith("http"):
+def _public_image(item: dict, settings, *, images=None, lock=False) -> str | None:
+    """Apply the same privacy guard to item and fallback, then require public HTTPS."""
+    for raw in (item.get("image"), settings.fallback_image_url):
+        if not raw:
+            continue
+        safe = images.get(raw) if images is not None else sf._image_url(raw, lock=lock)
+        if not safe:
+            continue
+        if safe.startswith("/"):
+            base = (settings.image_url_base or get_url()).rstrip("/")
+            safe = base + safe
+        parsed = urlsplit(safe)
+        if parsed.scheme == "https" and parsed.hostname and not parsed.username and not parsed.password:
             return safe
-        base = (settings.image_url_base or get_url()).rstrip("/")
-        return base + (safe if safe.startswith("/") else "/" + safe)
-    return settings.fallback_image_url or None
+    return None
 
 
-def _build_payloads(item_codes: list[str] | None, settings) -> tuple[list[dict], list[dict]]:
+def _build_payloads(item_codes: list[str] | None, settings, *, lock=False) -> tuple[list[dict], list[dict]]:
     """Build the items_batch ``requests`` array for the eligible items.
 
     Returns ``(requests, skipped)`` where each ``skipped`` is ``{code, reason}``. An item is
     skipped (never sent) when it has no selling price or no public image — exactly the cases
     the storefront would also refuse to sell, so the two surfaces stay identical."""
-    leaves = _eligible_leaves(item_codes)
+    leaves = _eligible_leaves(item_codes, lock=lock)
     if not leaves:
         return [], []
 
     names = [it["name"] for it in leaves]
     # §19.3 marketing-channel identifiers — reuse the storefront's EXACT GTIN resolution (native
     # Item Barcode rows) so FB/IG/Google carry the same g:gtin the RSS feed emits (no divergence).
-    gtins = sf._feed_gtins(names)
-    price_list = sf._selling_price_list()
-    prices = sf._prices(names, price_list)
-    levels = sf._stock_levels(names)  # 'out' | 'low' | 'in'; services always 'in'
-    # MA-5: sale price = the EXACT auto-Pricing-Rule discount the storefront shows /
-    # checkout charges (sf._sale_prices), so catalog promos == shop promos. Cheap no-op
-    # ({}) when no active sale rules. effective_date lets Meta self-expire the promo
-    # between syncs; the daily reconcile is the backstop.
-    prof = sf._profile()
-    sale_rates = sf._sale_prices(names, prices, prof)
-    sale_window = _sale_window() if sale_rates else None
+    gtins = sf._feed_gtins(names, lock=lock)
+    from doco_meta_catalog.catalog_pricing import quote
+
+    pricing = quote(names, settings, lock=lock)
+    prices = pricing["base_rates"]
+    levels = sf._stock_levels(names, lock=lock)  # 'out' | 'low' | 'in'; services always 'in'
+    # Generic catalog prices cannot safely quote customer/quantity Pricing Rules.
+    # quote() visibly blocks that configuration; never call _sale_prices here:
+    # it elevates, inserts a throwaway Sales Order and rolls back the caller.
     overrides = _group_overrides(settings)
     # Default 0 → Meta price == the exact shop price (parity). A shop may opt into a markup.
     markup = 1 + flt(settings.price_markup_percent) / 100.0
@@ -218,8 +220,11 @@ def _build_payloads(item_codes: list[str] | None, settings) -> tuple[list[dict],
     base_url = (settings.image_url_base or get_url()).rstrip("/")
     # staging = synced to the catalog but NOT shown on public FB/IG (review-first); published = live.
     default_visibility = settings.default_visibility or "staging"
-    vmeta = _variant_meta(leaves, settings)  # clean per-template (+ optional per-model) variant groups
+    vmeta = _variant_meta(leaves, settings, lock=lock)  # clean per-template (+ optional per-model) variant groups
 
+    from doco.docoutils.storefront._common import _image_urls
+
+    images = _image_urls([item.get("image") for item in leaves] + [settings.fallback_image_url], lock=lock)
     reqs: list[dict] = []
     skipped: list[dict] = []
     for it in leaves:
@@ -232,7 +237,7 @@ def _build_payloads(item_codes: list[str] | None, settings) -> tuple[list[dict],
         if not rate:
             skipped.append({"code": code, "reason": "no Item Price in selling price list"})
             continue
-        img = _public_image(it, settings)
+        img = _public_image(it, settings, images=images, lock=lock)
         if not img:
             skipped.append({"code": code, "reason": "no public image (private/signed/missing, no fallback)"})
             continue
@@ -254,7 +259,7 @@ def _build_payloads(item_codes: list[str] | None, settings) -> tuple[list[dict],
             "availability": _availability(levels.get(code, "out")),
             "condition": ov.get("condition") or settings.default_condition or "new",
             "price": _format_price(flt(rate) * markup, currency),
-            "link": f"{base_url}/shop/{code}",
+            "link": f"{base_url}/shop/{urlquote(code, safe='')}",
             "image_link": img,
             "brand": it.get("brand") or settings.default_brand or "",
             "visibility": ov.get("visibility") or default_visibility,
@@ -277,11 +282,6 @@ def _build_payloads(item_codes: list[str] | None, settings) -> tuple[list[dict],
             data["google_product_category"] = ov["google_product_category"]
         # MA-5: discounted price (struck-through original kept as `price`). markup applied
         # to both so sale_price < price holds. effective_date only when bounded.
-        sr = sale_rates.get(code)
-        if sr:
-            data["sale_price"] = _format_price(flt(sr) * markup, currency)
-            if sale_window:
-                data["sale_price_effective_date"] = sale_window
         reqs.append({"method": "UPDATE", "data": data})
     return reqs, skipped
 
@@ -316,168 +316,113 @@ def _sale_window() -> str | None:
     return f"{min(starts)}T00:00:00-06:00/{max(ends)}T23:59:59-06:00"
 
 
-# ---------------- Meta transport ----------------
+# ---------------- durable publication ----------------
 
 
-def _post_items_batch(settings, requests_payload):
+def _post_items_batch(settings, requests_payload, request_id=None):
+    """Compatibility producer: persist exact intent; only the worker sends it."""
     assert_outbound_allowed()
-    url = f"{settings.get_graph_root()}/{settings.catalog_id}/items_batch"
-    token = settings.get_token()
-    if not token:
-        frappe.throw("Meta Catalog: no access token configured")
-    r = requests.post(
-        url,
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-        json={"item_type": "PRODUCT_ITEM", "requests": requests_payload},
-        timeout=60,
-    )
-    if r.status_code >= 400:
-        try:
-            err = (r.json() or {}).get("error", {})
-            meta_err = f"{err.get('code')}/{err.get('error_subcode')}: {err.get('message')}"
-        except Exception:
-            meta_err = r.text[:500]
-        frappe.log_error(
-            title=f"Meta Catalog push HTTP {r.status_code}",
-            message=f"meta_error={meta_err}\nitems={len(requests_payload)} sample={json.dumps(requests_payload[:1])[:800]}",
-        )
-        r.raise_for_status()
-    resp = r.json()
-    # items_batch returns 200 even when Meta rejects INDIVIDUAL items (bad price/image/title/
-    # currency) — surface them so "why isn't product X on Facebook" is debuggable.
-    errs = [
-        {"id": v.get("retailer_id"), "errors": v.get("errors")}
-        for v in (resp.get("validation_status") or [])
-        if v.get("errors")
-    ]
-    if errs:
-        frappe.log_error(title="Meta Catalog item rejections", message=json.dumps(errs[:25])[:2000])
-    return resp
+    from doco_meta_catalog.publication import queue
 
-
-def _count_rejections(resp) -> int:
-    try:
-        return sum(1 for v in (resp or {}).get("validation_status", []) if v.get("errors"))
-    except Exception:
-        return 0
-
-
-def _catalog_product_count(settings):
-    """The catalog's CURRENT product_count, or None on error. items_batch 200 != ingested: the
-    unverified-business item cap silently drops the overflow with no per-item error, so a reconcile
-    that 'sent 2302' can leave only 1000 in the catalog with a falsely-green status."""
-    try:
-        r = requests.get(
-            f"{settings.get_graph_root()}/{settings.catalog_id}",
-            params={"fields": "product_count", "access_token": settings.get_token()},
-            timeout=30,
-        )
-        pc = (r.json() or {}).get("product_count") if r.ok else None
-        return int(pc) if pc is not None else None
-    except Exception:
-        return None
+    return queue(settings, requests_payload, request_id=request_id)
 
 
 # ---------------- doc-event hooks ----------------
 
 
+def _queue_refresh(item_name, doc, method):
+    from doco_meta_catalog import publication
+    from doco_meta_catalog.publication_contract import digest
+
+    settings = _get_settings()
+    if not settings:
+        return
+    revision = publication.scope(settings)["scope_revision"]
+    request = digest([doc.doctype, doc.name, str(doc.modified), method, item_name])
+    frappe.enqueue("doco_meta_catalog.sync.push_one", item_name=item_name,
+                   request_id=request, expected_scope=revision, queue="short",
+                   job_id="meta-catalog-refresh-" + request, deduplicate=True, enqueue_after_commit=True)
+
+
 def queue_item_sync(doc, method=None):
-    """Item.on_update — enqueue a background push so the save is not blocked by Meta latency.
-    Only published, sellable LEAF items reach Meta (mirror the storefront); templates and
-    unpublished/disabled items short-circuit here with zero side effects."""
+    """Every change matters, including unpublish/disable/template changes."""
     if not _get_settings():
         return
-    if doc.get("disabled") or not doc.get("publish_on_web") or doc.get("has_variants"):
-        return
-    frappe.enqueue(
-        "doco_meta_catalog.sync.push_one",
-        item_name=doc.name,
-        queue="short",
-        job_id=f"meta_catalog_push::{doc.name}",
-        deduplicate=True,
-    )
+    _queue_refresh(doc.name, doc, method)
+    for name in frappe.get_all("Item", filters={"variant_of": doc.name}, pluck="name", limit_page_length=0):
+        _queue_refresh(name, doc, method)
 
 
 def queue_item_delete(doc, method=None):
-    """Item.on_trash — enqueue a DELETE for this retailer_id."""
-    if not _get_settings():
-        return
-    frappe.enqueue(
-        "doco_meta_catalog.sync.delete_one",
-        item_name=doc.name,
-        queue="short",
-        job_id=f"meta_catalog_delete::{doc.name}",
-        deduplicate=True,
-    )
+    # Resolve after commit: an on_trash rollback must never remove a remote item.
+    queue_item_sync(doc, method)
+
+
+def queue_price_or_stock_sync(doc, method=None):
+    if doc.get("item_code"):
+        _queue_refresh(doc.item_code, doc, method)
+        # A component's Bin also changes the published bundle's availability.
+        bundles = frappe.get_all("Product Bundle Item", filters={"item_code": doc.item_code},
+                                  pluck="parent", limit_page_length=0)
+        if bundles:
+            for code in frappe.get_all("Product Bundle", filters={"name": ["in", bundles]},
+                                       pluck="new_item_code", limit_page_length=0):
+                _queue_refresh(code, doc, method)
+
+
+def queue_document_stock_sync(doc, method=None):
+    for code in {row.item_code for row in doc.get("items") or [] if row.get("item_code")}:
+        _queue_refresh(code, doc, method)
 
 
 # ---------------- workers ----------------
 
 
-def push_one(item_name: str):
+def push_one(item_name: str, request_id=None, expected_scope=None):
+    from doco_meta_catalog import publication
+
     s = _get_settings()
-    if not s:
-        return
+    if not s or (expected_scope and publication.scope(s)["scope_revision"] != expected_scope):
+        return {"state": "Blocked", "reason_code": "catalog_binding_changed"}
     reqs, _ = _build_payloads([item_name], s)
-    if reqs:
-        _post_items_batch(s, reqs)
+    if not reqs:
+        # Lost publication eligibility also means removal, not a silent no-op.
+        reqs = [{"method": "DELETE", "data": {"id": item_name}}]
+    return _post_items_batch(s, reqs, request_id=request_id)
 
 
 def delete_one(item_name: str):
-    s = _get_settings()
-    if not s:
-        return
-    _post_items_batch(s, [{"method": "DELETE", "data": {"id": item_name}}])
+    # Re-read current eligibility so a delayed deletion cannot remove a republished SKU.
+    return push_one(item_name)
 
 
 def full_reconcile():
-    """Nightly: re-push every eligible Item in chunks (safety net for missed webhooks)."""
+    """Queue canonical upserts and removals for IDs owned by this binding."""
+    from doco_meta_catalog import publication
+
     s = _get_settings()
     if not s:
-        return
-    reqs, skipped = _build_payloads(None, s)
-    sent = 0
-    rejected = 0
+        return {"state": "Blocked", "reason_code": "catalog_disabled"}
     try:
-        for i in range(0, len(reqs), _BATCH_CHUNK):
-            chunk = reqs[i : i + _BATCH_CHUNK]
-            resp = _post_items_batch(s, chunk)
-            sent += len(chunk)
-            rejected += _count_rejections(resp)
-    except Exception as e:
-        frappe.db.set_value(
-            SETTINGS_DOCTYPE, SETTINGS_DOCTYPE, "last_error", str(e)[:500], update_modified=False
-        )
-        raise
-    # PARITY CHECK: items_batch 200 = "accepted", not "ingested". Read the catalog back so a silent
-    # item cap or async rejection that drops items is reported instead of a falsely-green status.
-    in_catalog = _catalog_product_count(s)
-    if in_catalog is None:
-        # count unreadable → NOT green: the whole point of the read-back is to catch the silent cap,
-        # so a transient/permission read failure must surface, not fall through to OK.
-        status = f"UNVERIFIED: {sent} sent, catalog count unreadable"
-        frappe.log_error(title="Meta Catalog reconcile: count unreadable", message=status)
-    else:
-        drift = sent - in_catalog
-        if rejected or drift > 0:
-            status = f"WARN: {sent} sent, {in_catalog} in catalog"
-            if rejected:
-                status += f", {rejected} item errors"
-            if drift > 0:
-                status += f", {drift} NOT ingested (likely unverified-business cap / async rejects)"
-            frappe.log_error(title="Meta Catalog reconcile drift", message=status)
-        else:
-            status = f"OK ({sent} sent, {len(skipped)} skipped, {in_catalog} in catalog)"
-    frappe.db.set_value(
-        SETTINGS_DOCTYPE,
-        SETTINGS_DOCTYPE,
-        {
+        reqs, skipped = _build_payloads(None, s)
+    except (frappe.ValidationError, ValueError) as error:
+        frappe.db.set_single_value(SETTINGS_DOCTYPE, {
             "last_full_reconcile": frappe.utils.now(),
-            "last_full_reconcile_status": status[:140],
-            "last_error": "",
-        },
-        update_modified=False,
-    )
+            "last_full_reconcile_status": "BLOCKED: canonical catalog price/source requires review",
+            "last_error": str(error)[:500],
+        })
+        return {"state": "Blocked", "reason_code": "canonical_price_or_source_unavailable"}
+    desired = {row["data"]["id"] for row in reqs}
+    removed = sorted(set(publication.known_items(s)) - desired)
+    operations = reqs + [{"method": "DELETE", "data": {"id": code}} for code in removed]
+    queued = [_post_items_batch(s, operations[i:i + _BATCH_CHUNK])
+              for i in range(0, len(operations), _BATCH_CHUNK)]
+    status = f"QUEUED: {len(reqs)} updates, {len(removed)} removals; batch results and diagnostics pending"
+    frappe.db.set_single_value(SETTINGS_DOCTYPE, {
+        "last_full_reconcile": frappe.utils.now(), "last_full_reconcile_status": status[:140], "last_error": "",
+    })
+    return {"state": "Queued", "publications": queued, "updates": len(reqs),
+            "removals": len(removed), "skipped": len(skipped)}
 
 
 # ---------------- whitelisted admin actions ----------------
@@ -494,8 +439,7 @@ def sync_all_now():
 @frappe.whitelist()
 def sync_item_now(item_code: str):
     frappe.only_for("System Manager")
-    push_one(item_code)
-    return {"ok": True}
+    return push_one(item_code)
 
 
 @frappe.whitelist()

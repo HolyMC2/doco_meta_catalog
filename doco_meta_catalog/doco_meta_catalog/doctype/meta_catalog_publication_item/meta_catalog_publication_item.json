@@ -1,0 +1,30 @@
+{
+ "doctype": "DocType",
+ "name": "Meta Catalog Publication Item",
+ "module": "Doco Meta Catalog",
+ "engine": "InnoDB",
+ "autoname": "hash",
+ "field_order": [
+  "retailer_id",
+  "operation"
+ ],
+ "fields": [
+  {
+   "fieldname": "retailer_id",
+   "label": "Retailer Id",
+   "fieldtype": "Data",
+   "search_index": 1
+  },
+  {
+   "fieldname": "operation",
+   "label": "Operation",
+   "fieldtype": "Select",
+   "options": "UPDATE\nDELETE"
+  }
+ ],
+ "permissions": [],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "track_changes": 0,
+ "istable": 1
+}

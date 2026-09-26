@@ -1,174 +1,53 @@
-"""Inbound WhatsApp order -> draft Sales Order, picked off ASYNCHRONOUSLY from the WhatsApp Message
-doctype.
+"""Catalog intake from authenticated, durable WhatsApp receipts.
 
-frappe_whatsapp owns Meta's WABA webhook and persists every inbound message (including `order` carts,
-as a WhatsApp Message row with content_type='order' + product_catalog_json). We DO NOT front that
-webhook — instead a doc-event reacts to the persisted row and enqueues order->SO in the background.
-
-Why this shape (vs an HMAC edge webhook):
-  - No single point of failure: a connector bug/outage cannot blackhole the live inbox; chat keeps
-    flowing through frappe_whatsapp exactly as before.
-  - No Administrator elevation inside a guest request path; the worker job runs server-side.
-  - Order building is decoupled from Meta's webhook timeout/retry window; a failure lands in the RQ
-    failed-job queue (visible + retryable), not silently lost.
-There is no Meta HMAC on this path (frappe_whatsapp's webhook is unsigned); the forged-order blast
-radius is instead bounded by handle_order_message (server re-pricing, publish_on_web gate, caps,
-dedup, DRAFT-only). Wired in hooks.py: WhatsApp Message after_insert.
+The owning frappe_whatsapp receiver verifies the envelope and account before
+consuming one durable atom. Order review is local work in that same transaction;
+no sends, automatic customer matching or ERP order creation occur on ingestion.
+Old elevated menu/Flow/media/referral jobs are retired until their respective
+native CRM recipes carry explicit account, identity and conversation authority.
 """
 
 from __future__ import annotations
 
-import json
-
-import frappe
-
-_SETTINGS = "Meta Catalog Settings"
-
-
 def on_whatsapp_message(doc, method=None):
-    """after_insert on WhatsApp Message — ASYNC dispatch for INBOUND messages:
-      - `order` carts          -> draft Sales Order        (process_order)
-      - our namespaced buttons -> interactive menu reply    (process_menu_button, MA-2)
-      - text with a [ref:CODE] -> deep-link attribution     (process_inbound_text, MA-6)
+    """Persist a cart inside its authenticated receipt transaction.
 
-    Runs INSIDE frappe_whatsapp's still-open insert transaction, so every dispatch is
-    enqueue_after_commit (the row must exist for the worker) and guarded — a Redis/RQ
-    outage must NEVER bubble through doc.insert() and 500 / roll back the live inbox.
+    Legacy menu, Flow, referral and media handlers cannot carry native broker
+    authority. They stay inactive until a governed CRM recipe owns the action.
     """
     if (doc.get("type") or "").lower() == "outgoing":
-        return  # ignore our own echoes / outgoing rows
-    # MA-4: a CTWA ad click stamps ctwa_clid on the FIRST inbound message (any type).
-    # Dormant until frappe_whatsapp populates the field; the check is a cheap None.
-    if doc.get("ctwa_clid"):
-        _enqueue("process_ctwa", doc.name, "wa_ctwa")
-    ct = doc.get("content_type") or ""
-    if ct == "order":
-        # Order intake is INTENTIONALLY independent of the catalog-sync `enabled` toggle
-        # (that gates outbound catalog pushes, not inbound carts) — gating it could silently
-        # drop a real customer order. handle_order_message is self-bounded (reprice +
-        # publish_on_web gate + draft-only + atomic dedup), so it's safe to always run.
-        _enqueue("process_order", doc.name, "wa_order")
-    elif ct == "button" and (doc.get("message") or "").startswith("doco:"):
-        _enqueue("process_menu_button", doc.name, "wa_menu")  # MA-2 (gate checked in worker)
-    elif ct == "flow":
-        _enqueue("process_flow_intake", doc.name, "wa_flow")  # MA-11 (gate checked in worker)
-    elif ct in ("image", "video"):
-        _enqueue("process_media", doc.name, "wa_media")  # MA-12 (gate checked in worker)
-    elif ct == "text" and _wants_text_capture(doc):
-        _enqueue("process_inbound_text", doc.name, "wa_reftext")  # MA-6
+        return
+    if doc.get("content_type") == "order":
+        from doco_meta_catalog.orders import intake
 
-
-def _wants_text_capture(doc) -> bool:
-    """Cheap pre-filter so we don't spawn a worker for every chat line: only when the
-    body actually carries a ref token AND deep-link capture is enabled."""
-    from doco_meta_catalog import deeplinks
-    if not deeplinks.parse_ref(doc.get("message")):
-        return False
-    return bool(frappe.db.get_single_value(_SETTINGS, "deeplink_capture_enabled"))
-
-
-def _enqueue(method: str, name: str, prefix: str) -> None:
-    try:
-        frappe.enqueue(
-            f"doco_meta_catalog.inbound.{method}",
-            queue="short",
-            job_id=f"{prefix}::{name}",
-            deduplicate=True,
-            enqueue_after_commit=True,
-            wa_message=name,
-        )
-    except Exception:
-        frappe.log_error(title=f"WA {prefix} enqueue failed", message=frappe.get_traceback())
+        return intake(doc)
 
 
 def process_menu_button(wa_message: str):
-    """MA-2 worker: a customer tapped one of OUR namespaced menu buttons -> send the
-    matching interactive reply. Gated by inbound_menu_enabled (default off) so the
-    built-in menu never competes with a chatflow unless Marco opts in."""
-    from doco_meta_catalog import wa_helpers
-
-    row = frappe.db.get_value(
-        "WhatsApp Message", wa_message, ["from", "message", "content_type", "type"], as_dict=True)
-    if not row or (row.content_type or "") != "button" or (row.type or "").lower() == "outgoing":
-        return
-    bid = row.message or ""
-    if not bid.startswith(wa_helpers.MENU_PREFIX):
-        return
-    s = frappe.get_cached_doc(_SETTINGS)
-    if not s.get("inbound_menu_enabled"):
-        return
-    frappe.set_user("Administrator")  # senders are role-gated; the bot acts as the system
-    to = row.get("from")
-    if bid == wa_helpers.MENU_CATALOG:
-        wa_helpers.send_catalog_message(to)
-    elif bid == wa_helpers.MENU_ORDER:
-        wa_helpers.send_catalog_message(to, body="Arma tu pedido desde el catálogo y envíalo 🛒")
-    elif bid == wa_helpers.MENU_PAY:
-        url = (s.get("checkout_url") or "").strip()
-        if url:
-            wa_helpers.send_cta_url(to, "Completa tu pago aquí 👇", url, button_text="Pagar")
-        else:
-            frappe.log_error(title="MA-2 pay button: no checkout_url configured",
-                             message=f"wa_message={wa_message}")
+    """Old queued jobs must never regain the former Administrator authority."""
+    return {"state": "Blocked", "reason_code": "native_recipe_required"}
 
 
 def process_ctwa(wa_message: str):
-    """MA-4 worker: capture a CTWA click off an inbound message carrying ctwa_clid."""
-    from doco_meta_catalog import ctwa
-    ctwa.on_inbound_message(wa_message)
+    """Old queued jobs must never regain the former Administrator authority."""
+    return {"state": "Blocked", "reason_code": "native_recipe_required"}
 
 
 def process_flow_intake(wa_message: str):
-    """MA-11 worker: a WhatsApp Flow completion -> CRM Lead."""
-    from doco_meta_catalog import intake
-    intake.process_flow(wa_message)
+    """Old queued jobs must never regain the former Administrator authority."""
+    return {"state": "Blocked", "reason_code": "native_recipe_required"}
 
 
 def process_media(wa_message: str):
-    """MA-12 worker: attach an inbound photo/video to the sender's open Repair Order."""
-    from doco_meta_catalog import media
-    media.process_media(wa_message)
+    """Old queued jobs must never regain the former Administrator authority."""
+    return {"state": "Blocked", "reason_code": "native_recipe_required"}
 
 
 def process_inbound_text(wa_message: str):
-    """MA-6 worker: an inbound text carries a [ref:CODE] deep-link token -> record
-    attribution (CRM Touchpoint). Passive; no customer-facing send."""
-    from doco_meta_catalog import deeplinks
-
-    row = frappe.db.get_value(
-        "WhatsApp Message", wa_message,
-        ["from", "message", "content_type", "type", "message_id"], as_dict=True)
-    if not row or (row.content_type or "") != "text" or (row.type or "").lower() == "outgoing":
-        return
-    ref = deeplinks.parse_ref(row.message)
-    if not ref:
-        return
-    frappe.set_user("Administrator")
-    deeplinks.record_attribution(ref=ref, channel="WhatsApp", phone=row.get("from"),
-                                 message_id=row.get("message_id"))
+    """Old queued jobs must never regain the former Administrator authority."""
+    return {"state": "Blocked", "reason_code": "native_recipe_required"}
 
 
 def process_order(wa_message: str):
-    """Background worker: rebuild the Meta order payload from the WhatsApp Message row and create a
-    DRAFT Sales Order. A raise lands the job in the RQ failed queue (visible + retryable) — we never
-    swallow a real persisted order."""
-    from doco_meta_catalog import wa_helpers
-
-    row = frappe.db.get_value(
-        "WhatsApp Message",
-        wa_message,
-        ["from", "message_id", "product_catalog_json", "content_type", "type"],
-        as_dict=True,
-    )
-    if not row or (row.get("content_type") or "") != "order":
-        return
-    frappe.set_user("Administrator")  # past the guards; the SO/Customer inserts need elevation
-    try:
-        order = json.loads(row.get("product_catalog_json") or "{}")
-    except Exception:
-        frappe.log_error(title="WA order JSON parse failed", message=f"wa_message={wa_message}")
-        raise  # do not silently drop a real order — let it land in the RQ failed queue
-    if not isinstance(order, dict):
-        order = {}  # a valid-JSON list/scalar is not an order payload
-    message = {"id": row.get("message_id"), "from": row.get("from"), "order": order}
-    wa_helpers.handle_order_message(message, trusted=True)
+    """Retired queue entry point; only the receipt transaction may create an intake."""
+    return {"state": "Blocked", "reason_code": "receipt_transaction_required"}

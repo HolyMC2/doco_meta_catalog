@@ -1,11 +1,11 @@
 from frappe.model.document import Document
 
 
-class MetaCatalogDiagnostic(Document):
+class MetaCatalogPublicationResolution(Document):
     def validate(self):
         from doco_meta_catalog.publication import validate_evidence
         validate_evidence(self)
 
     def on_trash(self):
         import frappe
-        frappe.throw("Catalog diagnostic history is retained.", frappe.PermissionError)
+        frappe.throw("Publication resolution history is retained.", frappe.PermissionError)

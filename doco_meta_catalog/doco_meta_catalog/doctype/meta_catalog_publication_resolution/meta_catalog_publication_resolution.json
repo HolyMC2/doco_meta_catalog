@@ -1,0 +1,80 @@
+{
+ "doctype": "DocType",
+ "name": "Meta Catalog Publication Resolution",
+ "module": "Doco Meta Catalog",
+ "engine": "InnoDB",
+ "autoname": "hash",
+ "field_order": [
+  "prior_publication",
+  "next_publication",
+  "actor_user",
+  "request_id",
+  "note",
+  "scope_revision",
+  "catalog_id",
+  "account_name",
+  "scope_json"
+ ],
+ "fields": [
+  {
+   "fieldname": "prior_publication",
+   "label": "Prior Publication",
+   "fieldtype": "Link",
+   "options": "Meta Catalog Publication",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "next_publication",
+   "label": "Next Publication",
+   "fieldtype": "Link",
+   "options": "Meta Catalog Publication",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "actor_user",
+   "label": "Actor User",
+   "fieldtype": "Link",
+   "options": "User"
+  },
+  {
+   "fieldname": "request_id",
+   "label": "Request Id",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "note",
+   "label": "Note",
+   "fieldtype": "Small Text"
+  },
+  {
+   "fieldname": "scope_revision",
+   "label": "Scope Revision",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "catalog_id",
+   "label": "Catalog Id",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "account_name",
+   "label": "Account Name",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "scope_json",
+   "label": "Scope Json",
+   "fieldtype": "Long Text"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC"
+}

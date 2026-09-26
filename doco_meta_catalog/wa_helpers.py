@@ -8,7 +8,7 @@ Outbound:
 Inbound (called from a router in webhook.py):
     handle_order_message(msg, account) -> "Sales Order" name  (creates draft SO from cart payload)
 
-All outbound goes through the user-selected WhatsApp Account (defaults to is_default_outgoing).
+Legacy outbound endpoints fail closed; catalog delivery uses the CRM conversation outbox.
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ import frappe
 from frappe import _
 
 from doco_meta_catalog.utils import assert_outbound_allowed
-import requests
 
 # Reuse the storefront's per-IP + global rate limiter so a single compromised / low-priv
 # Desk session cannot blast the business WhatsApp number or burn the metered quota.
@@ -54,16 +53,8 @@ def _canon_phone(p: str) -> str:
 
 
 def _claim_order(msg_id: str) -> bool:
-    """Insert the dedup row for this WhatsApp order id INSIDE the caller's OPEN transaction — NO
-    commit here. The caller commits the claim + the Sales Order TOGETHER, so a failure between them
-    rolls BOTH back (no orphan claim that would make a retry silently drop a real order). Concurrent
-    retries race on the UNIQUE index — exactly one wins; the loser gets the duplicate and returns
-    False. Returns True when newly claimed."""
-    try:
-        frappe.get_doc({"doctype": "Meta Order Log", "wa_msg_id": msg_id}).insert(ignore_permissions=True)
-        return True
-    except frappe.DuplicateEntryError:
-        return False
+    """Legacy unsigned/global-ID jobs cannot claim receipt-backed intakes."""
+    return False
 
 
 def _outgoing_account():
@@ -78,28 +69,17 @@ def _outgoing_account():
 
 
 def _post_message(account, payload):
+    """Compatibility endpoint: the old account-default transport is retired.
+
+    A phone number alone is insufficient authority to send. Existing callers
+    must supply a canonical conversation, ownership generation and request id
+    to crm.api.catalog_commerce.queue_catalog (or the native text composer).
+    """
     assert_outbound_allowed()
-    url = f"{account.url.rstrip('/')}/{account.version}/{account.phone_id}/messages"
-    tok = account.get_password("token", raise_exception=False)
-    r = requests.post(
-        url,
-        headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
-        json=payload,
-        timeout=30,
+    frappe.throw(
+        _("Open the customer's CRM conversation to send this message with its current owner and account."),
+        frappe.PermissionError,
     )
-    if r.status_code >= 400:
-        try:
-            err = (r.json() or {}).get("error", {})
-            meta_err = f"{err.get('code')}/{err.get('error_subcode')}: {err.get('message')}"
-        except Exception:
-            meta_err = f"HTTP {r.status_code}"
-        safe = {k: v for k, v in payload.items() if k != "to"}  # buyer phone (`to`) is PII — redact
-        frappe.log_error(
-            title=f"WA send HTTP {r.status_code}",
-            message=f"meta_error={meta_err}\npayload(no recipient)={json.dumps(safe)[:1000]}",
-        )
-        r.raise_for_status()
-    return r.json()
 
 
 def _catalog_id():
@@ -298,118 +278,11 @@ def send_menu(to: str, body: str = "¿Cómo te ayudamos? 👇", footer: str | No
 # until a human reviews + submits). Runs ASYNC (enqueued) off the webhook request path.
 
 
-def handle_order_message(
-    message: dict,
-    whatsapp_account_name: str | None = None,
-    trusted: bool = False,
-) -> str | None:
-    """Build a DRAFT Sales Order from a Meta `order` (WhatsApp cart) message. Returns the SO name,
-    or None when nothing sellable / already ingested / malformed. Raises if `trusted` is not set.
-
-    Meta `order` payload: {"text": "...", "product_items": [{"product_retailer_id", "quantity",
-    "item_price", "currency"}, ...]}. `item_price` is buyer-supplied and is IGNORED — we re-price.
-    """
-    if not trusted:
-        # defense in depth: only the inbound doc-event path may build orders
-        frappe.throw("handle_order_message must be called from the trusted inbound path")
-
-    order = message.get("order") or {}
-    items = order.get("product_items") or []
-    if not items:
-        return None
-
-    from_number = _canon_phone((message.get("from") or "").strip())
-    if not _E164.match(from_number):
-        return None  # malformed / forged sender
-
-    msg_id = str(message.get("id") or "")[:120]
-    if not msg_id:
-        return None  # no WhatsApp message id → cannot dedup; real Meta orders always carry one
-
-    note = (order.get("text") or "").strip()
-
-    # build the priced, sellable lines FIRST (reads only — safe to recompute on a retry) so that an
-    # order with nothing sellable never claims a dedup row and never creates a Customer/SO. Aggregate
-    # qty per SKU (bounded iteration caps abuse), THEN cap DISTINCT lines so a big cart with repeats
-    # can't silently drop distinct codes past the line limit.
-    scan = items[: _sf._MAX_LINES * 10]  # ≤500 — far above any real cart, bounds a malicious one
-    codes = [pi.get("product_retailer_id") for pi in scan if pi.get("product_retailer_id")]
-    eligible = {it["name"] for it in sync._eligible_leaves(codes)}  # publish_on_web, leaf
-    prices = _sf._prices(list(eligible), _sf._selling_price_list())
-    agg: dict[str, int] = {}
-    for pi in scan:
-        code = pi.get("product_retailer_id")
-        if code not in eligible or not prices.get(code):
-            continue  # not a published / priced / sellable item (forged, unknown, or unpriced)
-        try:
-            qty = int(pi.get("quantity") or 1)
-        except (TypeError, ValueError, OverflowError):
-            continue  # NaN / Infinity / garbage qty → skip this line, not the whole order
-        if qty < 1:
-            continue
-        agg[code] = agg.get(code, 0) + qty
-    if not agg:
-        return None  # nothing sellable → no claim, no Customer, no SO
-    if len(agg) > _sf._MAX_LINES:
-        frappe.log_error(title="WA order exceeds line cap", message=f"{len(agg)} distinct items → capped to {_sf._MAX_LINES}")
-        agg = dict(list(agg.items())[: _sf._MAX_LINES])
-    lines = [
-        {"item_code": code, "qty": min(qty, _sf._MAX_QTY), "rate": flt(prices[code])}
-        for code, qty in agg.items()
-    ]
-
-    # ATOMIC claim + SO + note: insert the dedup row (no commit), the SO, and the buyer note, then
-    # commit ONCE. A failure anywhere rolls ALL back, so a retry re-creates the order — never an
-    # orphan claim that would make the retry drop a real order. Concurrent retries race on the index.
-    if not _claim_order(msg_id):
-        return None  # already ingested
-    try:
-        contact_name = None
-        try:
-            from crm.integrations.api import get_contact_by_phone_number
-            contact_name = (get_contact_by_phone_number(from_number) or {}).get("name")
-        except Exception:
-            pass
-        customer = _find_or_create_customer(from_number, contact_name)
-        delivery = frappe.utils.add_days(frappe.utils.today(), 1)
-        so = frappe.new_doc("Sales Order")
-        so.customer = customer
-        so.transaction_date = frappe.utils.today()
-        so.delivery_date = delivery
-        so.docstatus = 0  # DRAFT — human reviews + submits
-        so.po_no = f"WA-{msg_id}"
-        for ln in lines:
-            so.append("items", {**ln, "delivery_date": delivery})
-        so.insert(ignore_permissions=True)
-        frappe.db.set_value("Meta Order Log", {"wa_msg_id": msg_id}, "sales_order", so.name, update_modified=False)
-        if note:
-            so.add_comment("Comment", text=f"Nota del comprador (WhatsApp): {escape_html(note)[:500]}")
-        frappe.db.commit()  # claim + SO + note committed together
-    except Exception:
-        frappe.db.rollback()  # drop the claim too → a retry re-processes the real order
-        raise
-    return so.name
+def handle_order_message(message, whatsapp_account_name=None, trusted=False):
+    """Retired compatibility entry point: no Customer, Sales Order or outbound side effects."""
+    return None
 
 
 def _find_or_create_customer(phone: str, contact_name: str | None) -> str:
-    # 1. Try existing Customer with this mobile_no
-    cust = frappe.db.get_value("Customer", {"mobile_no": phone}, "name")
-    if cust:
-        return cust
-    # 2. Try via Contact link
-    if contact_name:
-        for link in frappe.get_all(
-            "Dynamic Link",
-            filters={"parenttype": "Contact", "parent": contact_name, "link_doctype": "Customer"},
-            fields=["link_name"],
-        ):
-            return link["link_name"]
-    # 3. Create a fresh walk-in style Customer
-    c = frappe.new_doc("Customer")
-    c.customer_name = (contact_name or phone)[:140]
-    c.customer_type = "Individual"
-    c.customer_group = frappe.db.get_value("Customer Group", {"is_group": 0}, "name") or "All Customer Groups"
-    c.territory = frappe.db.get_value("Territory", {"is_group": 0}, "name") or "All Territories"
-    c.mobile_no = phone
-    c.insert(ignore_permissions=True)
-    return c.name
+    """A reviewer must explicitly select a permitted Customer."""
+    raise frappe.PermissionError("Select the Customer in the conversation cart review.")

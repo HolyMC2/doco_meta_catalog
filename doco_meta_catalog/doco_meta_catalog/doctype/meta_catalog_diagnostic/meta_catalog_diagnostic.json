@@ -12,7 +12,12 @@
   "fb_status",
   "ig_status",
   "wa_status",
-  "errors"
+  "errors",
+  "diagnostic_run",
+  "catalog_id",
+  "account_name",
+  "scope_revision",
+  "observed"
  ],
  "fields": [
   {
@@ -60,6 +65,36 @@
    "fieldname": "errors",
    "fieldtype": "Small Text",
    "label": "Errors"
+  },
+  {
+   "fieldname": "diagnostic_run",
+   "label": "Diagnostic Run",
+   "fieldtype": "Link",
+   "options": "Meta Catalog Diagnostic Run",
+   "search_index": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "catalog_id",
+   "label": "Catalog Id",
+   "fieldtype": "Data",
+   "search_index": 1
+  },
+  {
+   "fieldname": "account_name",
+   "label": "Account Name",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "scope_revision",
+   "label": "Scope Revision",
+   "fieldtype": "Data",
+   "search_index": 1
+  },
+  {
+   "fieldname": "observed",
+   "label": "Observed",
+   "fieldtype": "Long Text"
   }
  ],
  "index_web_pages_for_search": 0,
@@ -71,16 +106,10 @@
  "owner": "Administrator",
  "permissions": [
   {
-   "create": 1,
-   "delete": 1,
-   "email": 1,
-   "export": 1,
-   "print": 1,
+   "role": "System Manager",
    "read": 1,
    "report": 1,
-   "role": "System Manager",
-   "share": 1,
-   "write": 1
+   "export": 1
   }
  ],
  "row_format": "Dynamic",
