@@ -164,9 +164,7 @@ class TestPublicationSql(CatalogFixture, unittest.TestCase):
             "price": "125.00 USD",
             "availability": "in stock",
             "visibility": "published",
-            "capability_to_review_status": [
-                {"capability": "WHATSAPP", "review_status": "APPROVED"}
-            ],
+            "capability_to_review_status": [{"key": "WHATSAPP", "value": "APPROVED"}],
         }
         with patch.object(
             publication, "graph_request", return_value=(200, {"data": [observed]})

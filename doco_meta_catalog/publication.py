@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import frappe
 import requests
-from frappe.utils import get_datetime, now_datetime
+from frappe.utils import cint, get_datetime, now_datetime
 
 from doco_meta_catalog import publication_contract as contract
 from doco_meta_catalog.utils import assert_outbound_allowed
@@ -36,7 +36,7 @@ def validate_evidence(doc):
         frappe.throw("Publication evidence identity is immutable.")
 
 
-def scope(settings):
+def scope(settings, *, lock=False):
     catalog = str(settings.catalog_id or "")
     if not re.fullmatch(r"[0-9]{1,40}", catalog):
         raise ValueError("catalog_id_invalid")
@@ -50,6 +50,7 @@ def scope(settings):
             account_name,
             ["name", "phone_id", "app_id", "business_id"],
             as_dict=True,
+            for_update=lock,
         )
         if not account:
             raise ValueError("catalog_account_unavailable")
@@ -70,16 +71,16 @@ def scope(settings):
 
 
 def current_settings(doc):
-    # Current locking reads after the worker's commit, not an earlier RR snapshot.
-    frappe.db.sql(
-        "SELECT field FROM tabSingles WHERE doctype='Meta Catalog Settings' FOR UPDATE"
+    # Build the document from locking VALUES, not a later ordinary RR read.
+    from doco_meta_catalog.commerce import _settings
+
+    values = _settings()
+    settings = frappe.get_doc(
+        {"doctype": "Meta Catalog Settings", "name": "Meta Catalog Settings", **values}
     )
-    settings = frappe.get_doc("Meta Catalog Settings")
-    if not settings.enabled:
+    if not cint(settings.enabled):
         raise ValueError("catalog_disabled")
-    if settings.whatsapp_account:
-        frappe.get_doc("WhatsApp Account", settings.whatsapp_account, for_update=True)
-    if scope(settings)["scope_revision"] != doc.scope_revision:
+    if scope(settings, lock=True)["scope_revision"] != doc.scope_revision:
         raise ValueError("catalog_binding_changed")
     return settings
 

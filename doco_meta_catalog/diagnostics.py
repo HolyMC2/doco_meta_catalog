@@ -63,11 +63,18 @@ def _fetch(settings, max_pages=60):
 
 
 def _caps(item):
-    return {
-        row["capability"]: row.get("review_status")
-        for row in item.get("capability_to_review_status") or []
-        if isinstance(row, dict) and row.get("capability")
-    }
+    """Current Graph maps use key/value; retain the legacy captured shape too."""
+    result = {}
+    for row in item.get("capability_to_review_status") or []:
+        if not isinstance(row, dict):
+            continue
+        key = row.get("key", row.get("capability"))
+        value = row.get("value", row.get("review_status"))
+        if isinstance(key, str) and 0 < len(key) <= 100:
+            result[key] = (
+                value if isinstance(value, str) and len(value) <= 100 else "unknown"
+            )
+    return result
 
 
 def _wa(caps):

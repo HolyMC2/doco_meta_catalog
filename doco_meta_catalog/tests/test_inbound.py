@@ -2,6 +2,8 @@
 import unittest
 from unittest.mock import patch
 
+import frappe
+
 from doco_meta_catalog import inbound, wa_helpers
 
 
@@ -18,13 +20,13 @@ class TestInboundPickoff(unittest.TestCase):
     def test_order_runs_inside_the_inserting_transaction(self):
         doc = _Doc(type="Incoming", content_type="order")
         with patch("doco_meta_catalog.orders.intake", return_value={"state": "Needs Review"}) as intake, \
-             patch.object(inbound.frappe, "enqueue") as enqueue:
+             patch.object(frappe, "enqueue") as enqueue:
             self.assertEqual(inbound.on_whatsapp_message(doc), {"state": "Needs Review"})
             intake.assert_called_once_with(doc)
             enqueue.assert_not_called()
 
     def test_outgoing_and_unrelated_messages_do_not_intake(self):
-        with patch("doco_meta_catalog.orders.intake") as intake, patch.object(inbound.frappe, "enqueue") as enqueue:
+        with patch("doco_meta_catalog.orders.intake") as intake, patch.object(frappe, "enqueue") as enqueue:
             inbound.on_whatsapp_message(_Doc(type="Outgoing", content_type="order"))
             inbound.on_whatsapp_message(_Doc(type="Incoming", content_type="text"))
             intake.assert_not_called()
@@ -36,10 +38,10 @@ class TestInboundPickoff(unittest.TestCase):
                 inbound.on_whatsapp_message(_Doc(type="Incoming", content_type="order"))
 
     def test_old_jobs_never_write_elevate_commit_or_send(self):
-        with patch.object(inbound.frappe, "set_user") as elevate, \
-             patch.object(inbound.frappe, "get_doc") as get_doc, \
-             patch.object(inbound.frappe, "new_doc") as new_doc, \
-             patch.object(inbound.frappe.db, "commit") as commit:
+        with patch.object(frappe, "set_user") as elevate, \
+             patch.object(frappe, "get_doc") as get_doc, \
+             patch.object(frappe, "new_doc") as new_doc, \
+             patch.object(frappe.db, "commit") as commit:
             self.assertEqual(inbound.process_order("old-message")["reason_code"], "receipt_transaction_required")
             self.assertIsNone(wa_helpers.handle_order_message({"id": "old-message"}, trusted=True))
             self.assertFalse(wa_helpers._claim_order("old-message"))

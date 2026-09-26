@@ -255,6 +255,13 @@ def _catalog_snapshot(doc, selection, *, lock=False):
             continue
         by_code[row.item_code].append(row)
     for code, candidates in by_code.items():
+        if code not in items:
+            prices[code] = {"issue": "unknown_item"}
+            continue
+        # Native party-specific prices take precedence over generic prices;
+        # duplicate rows within the applicable tier remain an explicit blocker.
+        party_prices = [row for row in candidates if row.customer == selection["customer"]]
+        candidates = party_prices or [row for row in candidates if not row.customer]
         if len(candidates) != 1 or any(row.supplier or row.batch_no or (row.uom and row.uom != items[code]["stock_uom"])
                                       or decimal(row.packing_unit or 1) != 1 for row in candidates):
             prices[code] = {"issue": "ambiguous_price"}
