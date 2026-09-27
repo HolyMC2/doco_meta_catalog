@@ -33,15 +33,22 @@ def _save(doc, *, new=False):
     return doc.insert() if new else doc.save()
 
 
-def _ready():
+def shared_scope_supported():
     from frappe import share
-    if getattr(share, "FILTER_SHARED_DOCUMENTS_VERSION", 0) != 1:
+    return getattr(share, "FILTER_SHARED_DOCUMENTS_VERSION", 0) == 1
+
+
+def _ready():
+    """Fail closed on cart review actions only, never on unrelated requests."""
+    if not shared_scope_supported():
         raise frappe.PermissionError("Cart review requires the supported shared-document scope base.")
 
 
-def check_request_compatibility():
-    if frappe.db.has_column(DOCTYPE, "intake_key"):
-        _ready()
+def warn_if_unsupported():
+    """Install/migrate notice. Other apps on the site must still install and migrate."""
+    if not shared_scope_supported():
+        print("doco_meta_catalog: this Frappe core lacks the shared-document scope hook; "
+              "WhatsApp cart intake and review stay unavailable until the supported core is deployed.")
 
 
 def intake(message):
@@ -50,7 +57,9 @@ def intake(message):
     if not name:
         return {"state": "Ignored", "reason_code": "receipt_transaction_required"}
     require(not getattr(frappe, "request", None), "receipt_transaction_required")
-    _ready()
+    if not shared_scope_supported():
+        # The WhatsApp Message keeps the cart; only the private review ledger waits.
+        return intake_unavailable(message, "shared_scope_unsupported")
     row = frappe.db.get_value("Meta Webhook Receipt", name,
         ["name", "event_key", "provider", "app_id", "account_id", "event_type", "event_id",
          "payload", "payload_hash", "state", "attempts", "lease_until"], as_dict=True, for_update=True)
@@ -75,6 +84,14 @@ def intake(message):
             ["name", "phone_id", "app_id", "business_id", "status", "mode"], as_dict=True, for_update=True)
         receipt_order(row, message.as_dict(), current_account)
         return _insert_intake(message, row, account, order, peer, business)
+
+
+def intake_unavailable(message, reason):
+    """Keep the inbound message; record why no reviewable cart was created."""
+    frappe.log_error(title="Meta cart intake unavailable",
+                     message=f"WhatsApp Message {message.name}: {reason}",
+                     reference_doctype="WhatsApp Message", reference_name=message.name)
+    return {"state": "Unavailable", "reason_code": reason}
 
 
 def _insert_intake(message, row, account, order, peer, business):

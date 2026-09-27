@@ -8,11 +8,11 @@ app_license = "mit"
 # reused from doco.docoutils.storefront so the Meta catalog == the live web shop.
 required_apps = ["frappe", "erpnext", "frappe_whatsapp", "doco"]
 
-before_install = "doco_meta_catalog.orders._ready"
-before_migrate = "doco_meta_catalog.orders._ready"
+# Unsupported cores only disable cart intake/review; install and migrate never block.
+before_install = "doco_meta_catalog.orders.warn_if_unsupported"
+before_migrate = "doco_meta_catalog.orders.warn_if_unsupported"
 after_install = "doco_meta_catalog.install.ensure_catalog_schema"
 after_migrate = "doco_meta_catalog.install.ensure_catalog_schema"
-before_request = ["doco_meta_catalog.orders.check_request_compatibility"]
 
 # Optional in CRM: the adapter grants no account access or transport authority.
 crm_catalog_commerce = "doco_meta_catalog.commerce"

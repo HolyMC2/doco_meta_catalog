@@ -68,4 +68,15 @@ class TestCatalogSchema(unittest.TestCase):
             hooks.after_install, "doco_meta_catalog.install.ensure_catalog_schema"
         )
         self.assertEqual(hooks.after_migrate, hooks.after_install)
-        self.assertNotIn(hooks.after_install, hooks.before_request)
+        # No site-wide request gate: an unsupported core must not block unrelated requests.
+        self.assertFalse(hasattr(hooks, "before_request"))
+
+    def test_unsupported_core_warns_without_blocking_install_or_migrate(self):
+        from doco_meta_catalog import orders
+
+        self.assertEqual(hooks.before_install, "doco_meta_catalog.orders.warn_if_unsupported")
+        self.assertEqual(hooks.before_migrate, hooks.before_install)
+        with patch.object(orders, "shared_scope_supported", return_value=False), \
+             patch("builtins.print") as notice:
+            orders.warn_if_unsupported()
+        notice.assert_called_once()
