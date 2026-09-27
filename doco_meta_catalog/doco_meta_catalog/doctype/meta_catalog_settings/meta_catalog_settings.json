@@ -109,11 +109,10 @@
    "options": "Currency"
   },
   {
-   "default": "Celulares Doco",
    "fieldname": "default_brand",
    "fieldtype": "Data",
    "label": "Default Brand",
-   "description": "Used when Item has no brand."
+   "description": "Blank uses the default company name."
   },
   {
    "default": "new",
@@ -328,7 +327,7 @@
  ],
  "issingle": 1,
  "links": [],
- "modified": "2026-06-28 00:10:00.000000",
+ "modified": "2026-09-27 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Doco Meta Catalog",
  "name": "Meta Catalog Settings",

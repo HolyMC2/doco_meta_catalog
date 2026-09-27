@@ -88,6 +88,12 @@ class TestBuildPayloads(unittest.TestCase):
         self.assertEqual(d["visibility"], "staging")  # default = hidden until reviewed
         self.assertNotIn("item_group_id", d)
 
+    def test_unset_brand_uses_the_default_company(self):
+        with patch("frappe.defaults.get_global_default", return_value="Tenant Company") as default:
+            reqs, _ = _run([_leaf("IT-A")], {"IT-A": 10.0}, {"IT-A": "in"}, FakeSettings(default_brand=None))
+        default.assert_called_once_with("company")
+        self.assertEqual(reqs[0]["data"]["brand"], "Tenant Company")
+
     def test_low_stock_is_in_stock(self):
         reqs, _ = _run([_leaf("IT-A")], {"IT-A": 10.0}, {"IT-A": "low"}, FakeSettings())
         self.assertEqual(reqs[0]["data"]["availability"], "in stock")

@@ -223,6 +223,8 @@ def _build_payloads(item_codes: list[str] | None, settings, *, lock=False) -> tu
     base_url = (settings.image_url_base or get_url()).rstrip("/")
     # staging = synced to the catalog but NOT shown on public FB/IG (review-first); published = live.
     default_visibility = settings.default_visibility or "staging"
+    # No shop name is baked into settings; an unset brand is the tenant's own company.
+    brand = settings.default_brand or frappe.defaults.get_global_default("company") or ""
     vmeta = _variant_meta(leaves, settings, lock=lock)  # clean per-template (+ optional per-model) variant groups
 
     from doco.docoutils.storefront._common import _image_urls
@@ -264,7 +266,7 @@ def _build_payloads(item_codes: list[str] | None, settings, *, lock=False) -> tu
             "price": _format_price(flt(rate) * markup, currency),
             "link": f"{base_url}/shop/{urlquote(code, safe='')}",
             "image_link": img,
-            "brand": it.get("brand") or settings.default_brand or "",
+            "brand": it.get("brand") or brand,
             "visibility": ov.get("visibility") or default_visibility,
             # MA-9: item_group as product_type so Meta Product Sets can auto-curate by group.
             "product_type": it.get("item_group") or "",
