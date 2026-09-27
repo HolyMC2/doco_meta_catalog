@@ -1,6 +1,6 @@
 # Doco account verification
 
-Observed 2026-09-26 America/Mazatlan (latest Facebook reads 2026-09-27 00:07 UTC).
+Observed 2026-09-26 America/Mazatlan (latest Facebook reads 2026-09-27 00:43 UTC).
 These are account observations, not release acceptance. No publication, message or payment was
 performed for these checks. Credentials remained in the existing Doco backend; retained receipts
 exclude access tokens and provider pagination URLs.
@@ -12,6 +12,7 @@ exclude access tokens and provider pagination URLs.
 | WhatsApp product review | Two sampled products report `WHATSAPP=APPROVED`, `visibility=staging` | Actual selected-item visibility and owned-recipient product/cart journey |
 | Facebook Page | Doco Page appears in the owned business's `owned_pages` result | Page-specific receiving/reply and commerce visibility acceptance |
 | Facebook Shop | Business `commerce_merchant_settings` GET returns 403 / OAuth code 200 | Account UI or appropriately authorized provider evidence; no claim that a shop exists or is absent |
+| Token grants | Complete `me/permissions` response confirms business, catalog and WhatsApp management/messaging grants; no `commerce_` grant appears | Determine the specific commerce capability and account grant required for the denied edge |
 | Facebook Marketplace listing | Not verified by these reads | Separate supported API/account/region contract and actual listing evidence |
 | Payment | External Mercado Pago links and POS payment are the selected path | Native order/payment/receipt/fulfilment/return acceptance; no native Meta checkout claim |
 
@@ -19,6 +20,8 @@ The permission denial says the app lacks a required permission or capability. It
 which requirement is missing. Meta's permissions reference returned HTTP 429 during research;
 we did not confirm a permission name, an App Review remedy or Mexico eligibility from that page.
 Do not broaden grants or create duplicate commerce assets based only on this response.
+The subsequent read-only permission inventory narrows the investigation but does not by itself
+establish the denied edge's exact permission requirement or prove that adding one grant is sufficient.
 
 Provider contracts consulted:
 
