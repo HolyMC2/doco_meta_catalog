@@ -24,10 +24,11 @@ def _settings():
     # values rather than a cached document/RR snapshot at the dispatch boundary.
     rows = frappe.db.sql("SELECT field,value FROM tabSingles WHERE doctype=%s FOR UPDATE", SETTINGS)
     settings = frappe._dict(rows)
-    settings.category_map = frappe.get_all(
+    settings.category_map = frappe.db.get_values(
         "Meta Catalog Category Map", filters={"parent": SETTINGS, "parenttype": SETTINGS},
-        fields=["item_group", "condition", "google_product_category", "exclude", "visibility"],
+        fieldname=["item_group", "condition", "google_product_category", "exclude", "visibility"],
         order_by="idx asc", for_update=True,
+        as_dict=True,
     )
     return settings
 

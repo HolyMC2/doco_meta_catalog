@@ -92,18 +92,19 @@ def _eligible_leaves(item_codes: list[str] | None = None, *, lock=False) -> list
         if not item_codes:
             return []
         filters["name"] = ["in", item_codes]
-    leaves = frappe.get_all("Item", filters=filters, fields=_LEAF_FIELDS, limit_page_length=0, for_update=lock)
+    leaves = frappe.db.get_values("Item", filters=filters, fieldname=_LEAF_FIELDS, limit=None, for_update=lock, as_dict=True)
     # A variant inherits a COPY of publish_on_web from its template; if the template is later
     # unpublished/disabled that copy can go stale. Mirror the storefront: a variant is sellable
     # only while its TEMPLATE is published — keeps catalog == web shop and blocks orphaned variants.
     templates = {l.get("variant_of") for l in leaves if l.get("variant_of")}
     if templates:
         live = set(
-            frappe.get_all(
+            frappe.db.get_values(
                 "Item",
                 filters={"name": ["in", list(templates)], "publish_on_web": 1, "disabled": 0},
-                pluck="name",
+                fieldname="name", pluck=True,
                 for_update=lock,
+                as_dict=True,
             )
         )
         leaves = [l for l in leaves if not l.get("variant_of") or l.get("variant_of") in live]
@@ -130,19 +131,20 @@ def _variant_meta(leaves: list[dict], settings, *, lock=False) -> dict:
     templates = {l["variant_of"] for l in variants}
     tmpl_names = {
         r["name"]: r["item_name"]
-        for r in frappe.get_all("Item", filters={"name": ["in", list(templates)]}, fields=["name", "item_name"], for_update=lock)
+        for r in frappe.db.get_values("Item", filters={"name": ["in", list(templates)]}, fieldname=["name", "item_name"], for_update=lock, as_dict=True)
     }
     group_attr = (getattr(settings, "variant_group_attribute", None) or "").strip()
     color_attr = (getattr(settings, "variant_color_attribute", None) or "").strip()
     wanted = [a for a in (group_attr, color_attr) if a]
     attr_map: dict = {}
     if wanted:
-        for r in frappe.get_all(
+        for r in frappe.db.get_values(
             "Item Variant Attribute",
             filters={"parent": ["in", names], "attribute": ["in", wanted]},
-            fields=["parent", "attribute", "attribute_value"],
-            limit_page_length=0,
+            fieldname=["parent", "attribute", "attribute_value"],
+            limit=None,
             for_update=lock,
+            as_dict=True,
         ):
             attr_map.setdefault(r["parent"], {})[r["attribute"]] = (r["attribute_value"] or "").strip()
     out = {}

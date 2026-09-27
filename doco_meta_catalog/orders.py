@@ -231,8 +231,8 @@ def _catalog_snapshot(doc, selection, *, lock=False):
     if lock and codes:
         frappe.db.sql("SELECT name FROM `tabItem` WHERE name IN %(codes)s ORDER BY name FOR UPDATE", {"codes": codes})
         frappe.db.sql("SELECT name FROM `tabItem Price` WHERE item_code IN %(codes)s ORDER BY name FOR UPDATE", {"codes": codes})
-    records = frappe.get_all("Item", filters={"name": ["in", codes]},
-        fields=["name", "item_name", "stock_uom", "is_stock_item", "is_sales_item", "item_group"], for_update=lock) if codes else []
+    records = frappe.db.get_values("Item", filters={"name": ["in", codes]},
+        fieldname=["name", "item_name", "stock_uom", "is_stock_item", "is_sales_item", "item_group"], for_update=lock, as_dict=True) if codes else []
     for row in records:
         if not frappe.has_permission("Item", "read", doc=row.name):
             raise frappe.PermissionError("Item read permission is required for cart review.")
@@ -244,9 +244,9 @@ def _catalog_snapshot(doc, selection, *, lock=False):
         "stock_tracked": bool(row.is_stock_item), "stock_uom": row.stock_uom,
         "whole_number": bool(frappe.db.get_value("UOM", row.stock_uom, "must_be_whole_number"))} for row in records}
     prices = {}
-    rows = frappe.get_all("Item Price", filters={"item_code": ["in", codes], "selling": 1, "price_list": price_list},
-        fields=["name", "item_code", "price_list_rate", "currency", "uom", "customer", "supplier", "batch_no",
-                "packing_unit", "valid_from", "valid_upto"], for_update=lock, order_by="name asc", limit_page_length=0) if codes and price_list else []
+    rows = frappe.db.get_values("Item Price", filters={"item_code": ["in", codes], "selling": 1, "price_list": price_list},
+        fieldname=["name", "item_code", "price_list_rate", "currency", "uom", "customer", "supplier", "batch_no",
+                "packing_unit", "valid_from", "valid_upto"], for_update=lock, order_by="name asc", limit=None, as_dict=True) if codes and price_list else []
     by_code = defaultdict(list)
     for row in rows:
         if row.valid_from and str(row.valid_from) > today() or row.valid_upto and str(row.valid_upto) < today():
@@ -305,7 +305,7 @@ def _catalog_snapshot(doc, selection, *, lock=False):
     result.update(currency=currency, price_list=price_list, markup_percent=float(markup),
                   base_rates={code: row.get("base_rate") for code, row in prices.items()},
                   pricing_rules=[{"name": row.name, "modified": str(row.modified)} for row in
-                      frappe.get_all("Pricing Rule", fields=["name", "modified"], order_by="name asc", for_update=lock, limit_page_length=0)],
+                      frappe.db.get_values("Pricing Rule", filters={}, fieldname=["name", "modified"], order_by="name asc", for_update=lock, limit=None, as_dict=True)],
                   can_create=not bool(BLOCKERS.intersection(result["issues"])))
     return result
 
@@ -313,10 +313,10 @@ def _catalog_snapshot(doc, selection, *, lock=False):
 def _locked_bundles(codes):
     result = {}
     if codes:
-        for row in frappe.get_all("Product Bundle", filters={"new_item_code": ["in", codes], "disabled": 0},
-                fields=["name", "new_item_code"], order_by="name asc", for_update=True):
-            result[row.new_item_code] = frappe.get_all("Product Bundle Item", filters={"parent": row.name},
-                fields=["item_code", "qty"], order_by="idx asc", for_update=True)
+        for row in frappe.db.get_values("Product Bundle", filters={"new_item_code": ["in", codes], "disabled": 0},
+                fieldname=["name", "new_item_code"], order_by="name asc", for_update=True, as_dict=True):
+            result[row.new_item_code] = frappe.db.get_values("Product Bundle Item", filters={"parent": row.name},
+                fieldname=["item_code", "qty"], order_by="idx asc", for_update=True, as_dict=True)
     return result
 
 

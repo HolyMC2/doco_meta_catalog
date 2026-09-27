@@ -197,12 +197,12 @@ class TestBuildPayloads(unittest.TestCase):
             _leaf("S1", variant_of=None),
         ]
 
-        def fake_get_all(dt, filters=None, fields=None, pluck=None, limit_page_length=None, **k):
-            if pluck == "name":
+        def fake_get_values(dt, filters=None, fieldname=None, pluck=False, limit=None, **k):
+            if pluck and fieldname == "name":
                 return ["T1"]  # only template T1 is published
             return leaves
 
-        with patch.object(sync.frappe, "get_all", side_effect=fake_get_all):
+        with patch.object(sync.frappe.db, "get_values", side_effect=fake_get_values):
             out = sync._eligible_leaves(["V1", "V2", "S1"])
         self.assertEqual({l["name"] for l in out}, {"V1", "S1"})  # V2 dropped: T2 unpublished
 

@@ -15,12 +15,13 @@ def quote(codes, settings, *, lock=False):
     Reviewed orders must show their separate native ERP quote before creation.
     """
     day = today()
-    rules = frappe.get_all(
+    rules = frappe.db.get_values(
         "Pricing Rule",
         filters={"selling": 1, "disable": 0, "coupon_code_based": 0},
-        fields=["name", "valid_from", "valid_upto"],
+        fieldname=["name", "valid_from", "valid_upto"],
         for_update=lock,
-        limit_page_length=0,
+        limit=None,
+        as_dict=True,
     )
     if any(
         (not row.valid_from or str(row.valid_from) <= day)
@@ -68,26 +69,27 @@ def quote(codes, settings, *, lock=False):
     uoms = (
         {
             row.name: row.stock_uom
-            for row in frappe.get_all(
+            for row in frappe.db.get_values(
                 "Item",
                 filters={"name": ["in", codes]},
-                fields=["name", "stock_uom"],
+                fieldname=["name", "stock_uom"],
                 for_update=lock,
-                limit_page_length=0,
+                limit=None,
+                as_dict=True,
             )
         }
         if codes
         else {}
     )
     rows = (
-        frappe.get_all(
+        frappe.db.get_values(
             "Item Price",
             filters={
                 "item_code": ["in", codes],
                 "selling": 1,
                 "price_list": price_list,
             },
-            fields=[
+            fieldname=[
                 "item_code",
                 "price_list_rate",
                 "currency",
@@ -100,7 +102,8 @@ def quote(codes, settings, *, lock=False):
                 "packing_unit",
             ],
             for_update=lock,
-            limit_page_length=0,
+            limit=None,
+            as_dict=True,
         )
         if codes
         else []
