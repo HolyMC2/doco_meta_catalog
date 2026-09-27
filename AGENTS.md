@@ -4,7 +4,16 @@
 
 New Frappe app (v0.2.0). Bridges ERPNext `Item` records into a Meta Commerce Catalog so the same product list serves WhatsApp Business Catalog messages, Facebook Shop, and Instagram Shopping — without running a parallel WooCommerce stack.
 
-Status: **INSTALLED on prod `ventas.docomexico.com` (2026-06-26), master gate `enabled=0` → zero Meta calls until configured.** Also installed on lab. NOT yet wired to a real Meta Catalog (no `catalog_id`/token). Sync logic now mirrors the live storefront (see "Storefront parity" below).
+Current account evidence (2026-09-26): an existing Doco catalog/account is configured and readable;
+the user confirmed its WhatsApp connection. See [account verification](docs/meta-account-verification.md)
+for the unresolved API observation and separate Facebook capability status. Do not create another
+catalog or repeat the connection request. Earlier installation and setup notes below are historical,
+not current configuration or authorization to publish/send.
+
+The CRM roadmap candidate replaces automatic cart-to-order creation with reviewed intake and routes
+customer messages through the CRM outbox. Legacy direct-send/auto-order examples below are not the
+candidate's acceptance path. Use current source and the CRM acceptance contract; all native/provider
+checks must pass before a production rollout. This candidate has not been deployed by this task.
 
 > **Storefront parity (commit `d8fa363`, 2026-06-26).** The earlier scaffold diverged from the live shop on four axes; `sync.py` now sources from `doco.docoutils.storefront` (the single source of truth) so the Meta catalog == the web shop by construction: publish gate = `Item.publish_on_web`; price = `Item Price.price_list_rate`; availability = live Bin `actual_qty - reserved_qty`; image = public `/files`/https only (`_image_url` guard, rejects `/private` + signed B2/S3). Variants pushed as individual `retailer_id`s grouped via `item_group_id`. `doco` is now a required app. Prod dry_run: 2,302 eligible / 1,992 skipped (unpriced or no photo — same items the storefront also won't sell).
 

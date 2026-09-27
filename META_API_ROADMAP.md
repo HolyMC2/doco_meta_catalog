@@ -2,22 +2,29 @@
 
 What's worth building from the Meta Graph API for **own-shops-first** (docomexico repair+accessories,
 mumulenceria lingerie), MX, WhatsApp-first. One Meta App `erpnext connector` (2082376078930469);
-one broad System User token already holds every scope below unless noted.
+Account permissions and provider eligibility must be verified for each action.
 
 ## Strategic reality (read first)
 
-- **Almost everything ships NOW** against Marco's own assets on scopes already held.
-- **Business Verification (pending, gov papers) gates ONLY**: catalog >1000 items, WhatsApp/IG commerce
-  item-review (what makes catalog products *sendable*/shoppable), FB/IG Shop + product-tagging. It does
-  **NOT** block any Phase 1/2 task.
-- **App Review (Advanced Access)** needed to act on **non-tester** customers for `pages_messaging`,
-  IG messaging/comments, and Lead Ads at scale → submit in parallel (Phase 0).
-- **MX-ineligible / dead-on-arrival — do NOT build**: WhatsApp Payments, Commerce Order Management,
-  `commerce_account_read_reports`, native FB/IG/WhatsApp checkout. Keep the **off-Meta Mercado Pago link**
-  via a CTA-URL button.
+- **Facebook/WhatsApp catalog commerce is the CRM roadmap's first channel priority.**
+  Mercado Libre follows it. Payment uses the approved external Mercado Pago link or POS collection.
+- **Dated account evidence, 2026-09-26:** the existing Doco catalog is readable with 2,711 products;
+  the user confirmed its WhatsApp connection and both phone commerce toggles are enabled. The
+  WABA catalog edge still returns an empty list. This is an unresolved observation, not permission
+  to reconnect it or proof that product messages have been delivered.
+- Doco's Facebook Page is readable. The app's business `commerce_merchant_settings` request
+  returns HTTP 403 / code 200 (required permission or capability absent). Facebook Shop,
+  Marketplace listing and native checkout remain unverified separately. Do not infer regional
+  eligibility, business verification or App Review status from token scopes or this denial.
+- Product review, visibility, catalog binding and actual delivery are separate checks. Two sampled
+  products reported WhatsApp approval but `visibility=staging`; this does not establish that every
+  catalog item is available to customers. See [account verification](docs/meta-account-verification.md).
 - New code lands in `doco_marketing` (campaigns/inbox/dispatch) + `doco_meta_catalog` (Meta token plumbing,
   sync extensions, CAPI emitter, webhook capture). Meta-HTTP duplicated per the no-cross-vertical-import
   rule; vertical-neutral so mumulenceria inherits it.
+
+Historical "SHIPPED" entries below describe earlier source checkpoints. They do not certify the
+current CRM roadmap candidate, current account eligibility or a completed provider journey.
 
 ## Themes
 1. **WhatsApp transactional + interactive ops** — utility templates on ERPNext events + interactive menus (daily driver).
