@@ -4,7 +4,6 @@ No network. These tests use actual controllers and permissions, not mocked ERP
 prices, SO insertion or conversation authorization. Cross-process locking proof
 belongs to the isolated concurrency driver; this suite tests replay and stale state.
 """
-import json
 from contextlib import contextmanager
 from unittest.mock import patch
 from uuid import uuid4
@@ -13,10 +12,10 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.tests.utils import make_test_records
 from frappe.utils import add_to_date, now_datetime
+from frappe_whatsapp.webhook_receipts import record_events
 
 from doco_meta_catalog import orders
 from doco_meta_catalog.orders_contract import CartError, canonical
-from frappe_whatsapp.webhook_receipts import record_events
 
 
 class TestOrdersNative(IntegrationTestCase):
@@ -42,8 +41,11 @@ class TestOrdersNative(IntegrationTestCase):
         self.prefix = "cart-" + uuid4().hex[:10]
         self.peer = "5215550100888"
         self.account = self.account_fixture()
+        self.customer_group = frappe.get_doc({"doctype": "Customer Group",
+            "customer_group_name": self.prefix + " customers", "parent_customer_group": "All Customer Groups",
+            "is_group": 0}).insert().name
         self.customer = frappe.get_doc({"doctype": "Customer", "customer_name": self.prefix,
-            "customer_type": "Individual", "customer_group": "All Customer Groups", "territory": "All Territories"}).insert().name
+            "customer_type": "Individual", "customer_group": self.customer_group, "territory": "All Territories"}).insert().name
         self.warehouse = frappe.get_doc({"doctype": "Warehouse", "warehouse_name": self.prefix,
             "company": self.company}).insert().name
         from erpnext.stock.doctype.item.test_item import make_item
@@ -184,7 +186,7 @@ class TestOrdersNative(IntegrationTestCase):
         review = orders.review_cart(name, **self.selected)
         orders.create_order(name, review["review_token"], "one", **self.selected)
         other_customer = frappe.get_doc({"doctype": "Customer", "customer_name": self.prefix + "-other",
-            "customer_type": "Individual", "customer_group": "All Customer Groups", "territory": "All Territories"}).insert().name
+            "customer_type": "Individual", "customer_group": self.customer_group, "territory": "All Territories"}).insert().name
         with self.assertRaises(frappe.ValidationError):
             orders.create_order(name, review["review_token"], "two", **dict(self.selected, customer=other_customer))
 
