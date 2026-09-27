@@ -495,13 +495,22 @@ def poll(name):
 def process_pending():
     """Bounded recovery sweep; Unknown is visible and never an automatic resend."""
     _worker_only()
-    for row in frappe.get_all(
+    ready = frappe.get_all(
         DOCTYPE,
-        filters={"state": ["in", ["Queued", "Submitting"]]},
+        filters={"state": ["in", ["Queued", "Submitting"]], "reason_code": ["!=", "prior_publication_pending"]},
         fields=["name"],
         order_by="creation asc",
         limit=20,
-    ):
+    )
+    # Rows waiting on an earlier publication must not starve newer independent ones.
+    waiting = frappe.get_all(
+        DOCTYPE,
+        filters={"state": "Queued", "reason_code": "prior_publication_pending"},
+        fields=["name"],
+        order_by="modified asc",
+        limit=20,
+    )
+    for row in ready + waiting:
         submit(row.name)
     for row in frappe.get_all(
         DOCTYPE,

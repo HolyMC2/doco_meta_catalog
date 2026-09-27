@@ -28,7 +28,6 @@ doc_events = {
     },
     "Bin": {
         "on_update": "doco_meta_catalog.sync.queue_price_or_stock_sync",
-        "on_change": "doco_meta_catalog.sync.queue_price_or_stock_sync",
     },
     # ERPNext writes many Bin quantities via db.set_value, bypassing Bin hooks.
     "Stock Ledger Entry": {

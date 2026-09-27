@@ -157,7 +157,7 @@ def on_sales_invoice_submit(doc, method=None):
         click = None
     user_data = _user_data(email=email, phone=phone, ctwa_clid=(click or {}).get("ctwa_clid"))
     custom = {
-        "currency": doc.get("currency") or "MXN",
+        "currency": doc.get("currency") or frappe.get_cached_value("Company", doc.get("company"), "default_currency"),
         "value": flt(doc.get("grand_total")),
         "content_type": "product",
         "content_ids": list({i.item_code for i in (doc.get("items") or []) if i.item_code}),

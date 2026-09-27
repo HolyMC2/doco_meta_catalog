@@ -104,7 +104,6 @@ def _eligible_leaves(item_codes: list[str] | None = None, *, lock=False) -> list
                 filters={"name": ["in", list(templates)], "publish_on_web": 1, "disabled": 0},
                 fieldname="name", pluck=True,
                 for_update=lock,
-                as_dict=True,
             )
         )
         leaves = [l for l in leaves if not l.get("variant_of") or l.get("variant_of") in live]
@@ -173,7 +172,7 @@ def _format_price(amount, currency: str) -> str:
     DEFAULT currency — our catalog defaults to USD, so an integer 280000 published as
     $2,800.00 USD instead of MX$2,800.00 (a ~17x mispricing). The string form pins the
     currency per item and is independent of the catalog default. Verified 2026-06-26."""
-    return f"{flt(amount):.2f} {currency or 'MXN'}"
+    return f"{flt(amount):.2f} {currency}"
 
 
 def _public_image(item: dict, settings, *, images=None, lock=False) -> str | None:
@@ -218,7 +217,9 @@ def _build_payloads(item_codes: list[str] | None, settings, *, lock=False) -> tu
     overrides = _group_overrides(settings)
     # Default 0 → Meta price == the exact shop price (parity). A shop may opt into a markup.
     markup = 1 + flt(settings.price_markup_percent) / 100.0
-    currency = settings.default_currency or "MXN"
+    from doco_meta_catalog.catalog_pricing import catalog_currency
+
+    currency = catalog_currency(settings)
     base_url = (settings.image_url_base or get_url()).rstrip("/")
     # staging = synced to the catalog but NOT shown on public FB/IG (review-first); published = live.
     default_visibility = settings.default_visibility or "staging"
@@ -333,19 +334,40 @@ def _post_items_batch(settings, requests_payload, request_id=None):
 
 
 def _queue_refresh(item_name, doc, method):
-    from doco_meta_catalog import publication
+    """Enqueue only. Binding validation and scope belong to the worker, never to the
+    stock/price/order transaction that fired the event."""
     from doco_meta_catalog.publication_contract import digest
 
     settings = _get_settings()
     if not settings:
         return
-    revision = publication.scope(settings)["scope_revision"]
     request = digest([doc.doctype, doc.name, str(doc.modified), method, item_name])
+    # One pending refresh per item and binding; the worker re-reads current state.
+    job = digest([str(settings.catalog_id), str(settings.whatsapp_account or ""), item_name])
     frappe.enqueue("doco_meta_catalog.sync.push_one", item_name=item_name,
-                   request_id=request, expected_scope=revision, queue="short",
-                   job_id="meta-catalog-refresh-" + request, deduplicate=True, enqueue_after_commit=True)
+                   request_id=request, queue="short",
+                   job_id="meta-catalog-refresh-" + job, deduplicate=True, enqueue_after_commit=True)
 
 
+def _never_block(handler):
+    """Catalog refresh must not fail the business document that triggered it.
+
+    Database errors still propagate: the transaction is already unusable then.
+    """
+    from functools import wraps
+
+    @wraps(handler)
+    def run(doc, method=None):
+        try:
+            return handler(doc, method)
+        except (frappe.ValidationError, ValueError, KeyError, TypeError, AttributeError):
+            frappe.log_error(title="Meta catalog refresh not queued",
+                             reference_doctype=doc.get("doctype"), reference_name=doc.get("name"))
+
+    return run
+
+
+@_never_block
 def queue_item_sync(doc, method=None):
     """Every change matters, including unpublish/disable/template changes."""
     if not _get_settings():
@@ -360,6 +382,7 @@ def queue_item_delete(doc, method=None):
     queue_item_sync(doc, method)
 
 
+@_never_block
 def queue_price_or_stock_sync(doc, method=None):
     # Hot stock path: no bundle lookups on tenants without an enabled catalog binding.
     if not _get_settings():
@@ -375,6 +398,7 @@ def queue_price_or_stock_sync(doc, method=None):
                 _queue_refresh(code, doc, method)
 
 
+@_never_block
 def queue_document_stock_sync(doc, method=None):
     if not _get_settings():
         return
@@ -389,12 +413,20 @@ def push_one(item_name: str, request_id=None, expected_scope=None):
     from doco_meta_catalog import publication
 
     s = _get_settings()
-    if not s or (expected_scope and publication.scope(s)["scope_revision"] != expected_scope):
-        return {"state": "Blocked", "reason_code": "catalog_binding_changed"}
-    reqs, _ = _build_payloads([item_name], s)
-    if not reqs:
-        # Lost publication eligibility also means removal, not a silent no-op.
-        reqs = [{"method": "DELETE", "data": {"id": item_name}}]
+    if not s:
+        return {"state": "Blocked", "reason_code": "catalog_disabled"}
+    try:
+        if expected_scope and publication.scope(s)["scope_revision"] != expected_scope:
+            return {"state": "Blocked", "reason_code": "catalog_binding_changed"}
+        reqs, _ = _build_payloads([item_name], s)
+        if not reqs:
+            # Lost eligibility means removal, but only of IDs this binding published.
+            if item_name not in publication.known_items(s):
+                return {"state": "Skipped", "reason_code": "never_published"}
+            reqs = [{"method": "DELETE", "data": {"id": item_name}}]
+    except (frappe.ValidationError, ValueError) as error:
+        # A price/configuration blocker is visible state, not an RQ failure.
+        return {"state": "Blocked", "reason_code": "catalog_review_required", "detail": str(error)[:200]}
     return _post_items_batch(s, reqs, request_id=request_id)
 
 
