@@ -361,6 +361,9 @@ def queue_item_delete(doc, method=None):
 
 
 def queue_price_or_stock_sync(doc, method=None):
+    # Hot stock path: no bundle lookups on tenants without an enabled catalog binding.
+    if not _get_settings():
+        return
     if doc.get("item_code"):
         _queue_refresh(doc.item_code, doc, method)
         # A component's Bin also changes the published bundle's availability.
@@ -373,6 +376,8 @@ def queue_price_or_stock_sync(doc, method=None):
 
 
 def queue_document_stock_sync(doc, method=None):
+    if not _get_settings():
+        return
     for code in {row.item_code for row in doc.get("items") or [] if row.get("item_code")}:
         _queue_refresh(code, doc, method)
 

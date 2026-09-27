@@ -245,6 +245,21 @@ class TestPublicationSql(CatalogFixture, unittest.TestCase):
                 )
             self.assertTrue(enqueue.call_args.kwargs["enqueue_after_commit"])
 
+    def test_stock_events_are_inert_without_enabled_binding(self):
+        event = frappe._dict(
+            doctype="Bin", name="source", item_code=self.item.name, modified=now_datetime()
+        )
+        order = frappe._dict(doctype="Sales Order", name="source", modified=now_datetime(),
+                             items=[frappe._dict(item_code=self.item.name)])
+        with (
+            patch.object(sync, "_get_settings", return_value=None),
+            patch("frappe.enqueue") as enqueue,
+            patch("frappe.get_all", side_effect=AssertionError("Bundle lookup ran")),
+        ):
+            sync.queue_price_or_stock_sync(event, "on_update")
+            sync.queue_document_stock_sync(order, "on_submit")
+        enqueue.assert_not_called()
+
     def test_generic_quote_has_no_elevation_document_insert_or_transaction_reset(self):
         actor = frappe.session.user
         with (
