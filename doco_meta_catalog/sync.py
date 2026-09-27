@@ -345,10 +345,22 @@ def _queue_refresh(item_name, doc, method):
         return
     request = digest([doc.doctype, doc.name, str(doc.modified), method, item_name])
     # One pending refresh per item and binding; the worker re-reads current state.
-    job = digest([str(settings.catalog_id), str(settings.whatsapp_account or ""), item_name])
+    key = digest([str(settings.catalog_id), str(settings.whatsapp_account or ""), item_name])
+    # A change committed while that job already runs is deduplicated away; the
+    # dirty mark makes the running job refresh once more when it finishes.
+    frappe.db.after_commit.add(lambda: frappe.cache.hset(_DIRTY, key, 1))
+    _enqueue_refresh(item_name, key, request_id=request)
+
+
+_DIRTY = "meta_catalog_refresh_dirty"
+
+
+def _enqueue_refresh(item_name, key, *, request_id=None, rerun=False):
+    # A follow-up uses the other job id: the running job still holds its own.
     frappe.enqueue("doco_meta_catalog.sync.push_one", item_name=item_name,
-                   request_id=request, queue="short",
-                   job_id="meta-catalog-refresh-" + job, deduplicate=True, enqueue_after_commit=True)
+                   request_id=request_id, refresh_key=key, rerun=rerun, queue="short",
+                   job_id="meta-catalog-refresh-" + key + ("-rerun" if rerun else ""),
+                   deduplicate=True, enqueue_after_commit=True)
 
 
 def _never_block(handler):
@@ -411,7 +423,17 @@ def queue_document_stock_sync(doc, method=None):
 # ---------------- workers ----------------
 
 
-def push_one(item_name: str, request_id=None, expected_scope=None):
+def push_one(item_name: str, request_id=None, expected_scope=None, refresh_key=None, rerun=False):
+    if refresh_key:
+        frappe.cache.hdel(_DIRTY, refresh_key)
+    try:
+        return _push_one(item_name, request_id, expected_scope)
+    finally:
+        if refresh_key and frappe.cache.hget(_DIRTY, refresh_key):
+            _enqueue_refresh(item_name, refresh_key, rerun=not rerun)
+
+
+def _push_one(item_name, request_id=None, expected_scope=None):
     from doco_meta_catalog import publication
 
     s = _get_settings()

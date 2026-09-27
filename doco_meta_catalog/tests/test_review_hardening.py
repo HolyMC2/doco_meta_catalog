@@ -127,3 +127,40 @@ class TestScopedPricingRules(unittest.TestCase):
             with self.assertRaises(frappe.ValidationError):
                 catalog_pricing.catalog_currency(frappe._dict(default_currency=None))
         self.assertIn("currency", throw.call_args.args[0])
+
+
+class TestRefreshDuringRun(unittest.TestCase):
+    def setUp(self):
+        self.cache = {}
+        self.jobs = []
+        api = MagicMock()
+        api.cache.hset.side_effect = lambda name, key, value: self.cache.__setitem__(key, value)
+        api.cache.hget.side_effect = lambda name, key: self.cache.get(key)
+        api.cache.hdel.side_effect = lambda name, key: self.cache.pop(key, None)
+        api.enqueue.side_effect = lambda *a, **kw: self.jobs.append(kw)
+        patcher = patch("doco_meta_catalog.sync.frappe", api)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_change_committed_during_the_run_refreshes_once_more(self):
+        def run(*args):
+            self.cache["key"] = 1  # Deduplicated event committed mid-run.
+            return {"state": "Queued"}
+
+        with patch.object(sync, "_push_one", side_effect=run):
+            sync.push_one("SKU-1", refresh_key="key")
+        self.assertEqual(len(self.jobs), 1)
+        self.assertEqual(self.jobs[0]["job_id"], "meta-catalog-refresh-key-rerun")
+        self.assertTrue(self.jobs[0]["rerun"])
+
+        self.jobs.clear()
+        with patch.object(sync, "_push_one", return_value={"state": "Queued"}):
+            sync.push_one("SKU-1", refresh_key="key", rerun=True)
+        self.assertEqual(self.jobs, [])  # Clean run: nothing more to do.
+
+    def test_mark_set_before_the_job_started_is_consumed_by_that_run(self):
+        self.cache["key"] = 1
+        with patch.object(sync, "_push_one", return_value={"state": "Queued"}):
+            sync.push_one("SKU-1", refresh_key="key")
+        self.assertEqual(self.jobs, [])
+
