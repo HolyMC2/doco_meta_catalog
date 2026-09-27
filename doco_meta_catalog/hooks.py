@@ -10,6 +10,8 @@ required_apps = ["frappe", "erpnext", "frappe_whatsapp", "doco"]
 
 before_install = "doco_meta_catalog.orders._ready"
 before_migrate = "doco_meta_catalog.orders._ready"
+after_install = "doco_meta_catalog.install.ensure_catalog_schema"
+after_migrate = "doco_meta_catalog.install.ensure_catalog_schema"
 before_request = ["doco_meta_catalog.orders.check_request_compatibility"]
 
 # Optional in CRM: the adapter grants no account access or transport authority.
