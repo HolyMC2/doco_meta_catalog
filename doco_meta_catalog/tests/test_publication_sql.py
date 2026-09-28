@@ -283,14 +283,14 @@ class TestPublicationSql(CatalogFixture, unittest.TestCase):
     def test_automatic_rule_never_silently_falls_back_to_base_catalog_price(self):
         original = frappe.db.get_values
 
-        def rules(doctype, **kwargs):
+        def rules(doctype, *args, **kwargs):
             if doctype == "Pricing Rule":
                 return [
                     frappe._dict(
                         name="controlled-rule", valid_from=None, valid_upto=None
                     )
                 ]
-            return original(doctype, **kwargs)
+            return original(doctype, *args, **kwargs)
 
         with patch.object(frappe.db, "get_values", side_effect=rules):
             with self.assertRaisesRegex(
