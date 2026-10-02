@@ -372,11 +372,18 @@ def _never_block(handler):
 
     @wraps(handler)
     def run(doc, method=None):
+        nonfatal_errors = (frappe.ValidationError, frappe.PermissionError,
+                           ValueError, KeyError, TypeError, AttributeError)
         try:
             return handler(doc, method)
-        except (frappe.ValidationError, ValueError, KeyError, TypeError, AttributeError):
-            frappe.log_error(title="Meta catalog refresh not queued",
-                             reference_doctype=doc.get("doctype"), reference_name=doc.get("name"))
+        except nonfatal_errors:
+            try:
+                frappe.log_error(title="Meta catalog refresh not queued",
+                                 reference_doctype=doc.get("doctype"), reference_name=doc.get("name"))
+            except nonfatal_errors:
+                # Queue-pressure diagnostics can hit the same permission/validation
+                # guard. Keep the after-commit dirty mark; database errors still raise.
+                pass
 
     return run
 
