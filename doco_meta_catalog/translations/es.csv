@@ -1,0 +1,42 @@
+"Turns on the Facebook, Instagram and WhatsApp catalog. Off: nothing is sent to Meta.","Activa el catálogo de Facebook, Instagram y WhatsApp. Apagado: no se envía nada a Meta."
+Meta Connection,Conexión con Meta
+Optional. Uses the connection of this WhatsApp account instead of a separate key.,Opcional. Usa la conexión de esta cuenta de WhatsApp en lugar de otra clave.
+Meta access key with catalog permission (and WhatsApp permission if you also send products from here).,Clave de acceso de Meta con permiso de catálogo (y de WhatsApp si también envías productos desde aquí).
+Public address of your shop for the photos (e.g. https://mitienda.mx). Empty = this site's address.,Dirección pública de tu tienda para las fotos (p. ej. https://mitienda.mx). Vacío = la del sitio.
+"Optional. Set the condition (new, refurbished…) and the Google category for each item group. Groups without a row use the Default Condition above.","Opcional. Indica la condición (nuevo, reacondicionado…) y la categoría de Google de cada grupo. Los grupos sin fila usan la condición predeterminada."
+WhatsApp menu and chat-link tracking. Both start off; turn them on per shop. The menu can work alongside automatic replies.,Menú de WhatsApp y seguimiento de ligas de chat. Ambos empiezan apagados; actívalos por tienda. El menú puede convivir con las respuestas automáticas.
+Enable WhatsApp Menu,Activar menú de WhatsApp
+"When the customer taps a menu button (Catálogo / Pedir / Pagar), reply with the matching message.","Cuando el cliente toca un botón del menú (Catálogo / Pedir / Pagar), responde con el mensaje que corresponde."
+Track Chat Links,Registrar ligas de chat
+Records which WhatsApp chat link the customer came from.,Registra de qué liga de WhatsApp llegó el cliente.
+Business WhatsApp number with country code (e.g. 5216691234567) for chat links.,Número de WhatsApp del negocio con lada (p. ej. 5216691234567) para las ligas de chat.
+Create Lead From WhatsApp Form,Crear prospecto desde formulario de WhatsApp
+"When a customer completes a WhatsApp form, create a lead with the answers.","Al terminar un formulario de WhatsApp, crea un prospecto con las respuestas."
+Attach Customer Photos to Repair Order,Adjuntar fotos del cliente a la orden de reparación
+Attach a photo or video the customer sends to their open repair order (e.g. a cracked screen). Does nothing if the customer has no open repair order.,Adjunta la foto o video que manda el cliente a su orden de reparación abierta (p. ej. una pantalla rota). No hace nada si no tiene orden abierta.
+Ad Conversions,Conversiones de anuncios
+"Sends sales and new leads to a Meta dataset (Pixel) to measure ads. Uses its own dataset key, not the catalog key. Off by default.","Envía ventas y prospectos nuevos a un conjunto de datos de Meta (Pixel) para medir anuncios. Usa su propia clave, no la del catálogo. Apagado por omisión."
+Send Conversions to Meta,Enviar conversiones a Meta
+Tells Meta about sales and new leads (customer data is protected) to measure ads.,Avisa a Meta de ventas y prospectos (los datos del cliente van protegidos) para medir anuncios.
+Where a sale is reported from when the customer did not come from a WhatsApp ad. Sales from a WhatsApp ad are always reported as WhatsApp.,De dónde se reporta la venta cuando el cliente no llegó por un anuncio de WhatsApp. Las ventas de un anuncio de WhatsApp siempre se reportan como WhatsApp.
+Access key for this dataset (Events Manager › Settings › Generate access token). Separate from the catalog key.,Clave de acceso de este conjunto de datos (Events Manager › Settings › Generate access token). Es distinta de la del catálogo.
+Optional: Google category number or path (e.g. 267 = Mobile Phones).,Opcional: categoría de Google (p. ej. 267 = Teléfonos móviles).
+"How the product set is built: by item group, brand, availability, or a Meta filter (manual).","Cómo se arma el conjunto: por grupo, marca, disponibilidad o un filtro de Meta (manual)."
+"Group, brand or availability (""in stock""). For manual, a Meta filter.","Grupo, marca o disponibilidad («in stock»). En manual, un filtro de Meta."
+WhatsApp Notice,Aviso de WhatsApp
+The Facebook catalog is still being set up on your system. Contact support.,El catálogo de Facebook aún se está preparando en tu sistema. Contacta a soporte.
+new,Nuevo
+refurbished,Reacondicionado
+used,Usado
+used_like_new,Como nuevo
+used_good,Buen estado
+used_fair,Estado regular
+website,Sitio web
+business_messaging,Mensajes del negocio
+system_generated,Generado por el sistema
+physical_store,Tienda física
+account_unknown,Cuenta desconocida
+verified,Verificada
+item_group,Grupo de artículos
+brand,Marca
+availability,Disponibilidad

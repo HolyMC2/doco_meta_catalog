@@ -28,7 +28,7 @@ _REF_OK = re.compile(r"^[A-Za-z0-9_.\-]{1,40}$")
 def _clean_ref(ref: str) -> str:
     ref = (ref or "").strip()
     if not _REF_OK.match(ref):
-        frappe.throw(_("ref inválido: 1–40 caracteres [A-Za-z0-9_.-]"))
+        frappe.throw(_("El código de referencia debe tener de 1 a 40 letras, números, puntos o guiones."))
     return ref
 
 
@@ -40,7 +40,7 @@ def build_wa_link(ref: str, text: str | None = None, number: str | None = None) 
     ref = _clean_ref(ref)
     number = re.sub(r"\D", "", number or frappe.db.get_single_value(_SETTINGS, "business_whatsapp_number") or "")
     if not number:
-        frappe.throw(_("Falta el número de WhatsApp (parámetro `number` o Meta Catalog Settings.business_whatsapp_number)."))
+        frappe.throw(_("Falta el número de WhatsApp del negocio en los ajustes del catálogo de Meta."))
     prefill = f"{text or 'Hola, me interesa 👋'} [ref:{ref}]"
     return f"https://wa.me/{number}?text={quote(prefill)}"
 
@@ -53,7 +53,7 @@ def build_mme_link(ref: str, page: str | None = None) -> str:
     ref = _clean_ref(ref)
     page = page or frappe.db.get_value("Messenger Settings", "Messenger Settings", "page_id")
     if not page:
-        frappe.throw(_("Falta el page id de Messenger (parámetro `page` o Messenger Settings.page_id)."))
+        frappe.throw(_("Falta la página de Facebook en los ajustes de Messenger."))
     return f"https://m.me/{page}?ref={ref}"
 
 

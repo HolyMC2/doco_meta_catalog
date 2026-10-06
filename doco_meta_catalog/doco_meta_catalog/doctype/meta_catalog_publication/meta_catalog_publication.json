@@ -46,6 +46,7 @@
   },
   {
    "fieldname": "scope_json",
+   "hidden": 1,
    "label": "Scope Json",
    "fieldtype": "Long Text"
   },
@@ -56,6 +57,7 @@
   },
   {
    "fieldname": "request_hash",
+   "hidden": 1,
    "label": "Request Hash",
    "fieldtype": "Data"
   },

@@ -54,7 +54,7 @@
    "in_list_view": 1,
    "label": "Google Product Category",
    "columns": 4,
-   "description": "Optional google_product_category id or path (e.g. 267 = Electronics > Communications > Telephony > Mobile Phones)."
+   "description": "Optional: Google category number or path (e.g. 267 = Mobile Phones)."
   }
  ],
  "istable": 1,

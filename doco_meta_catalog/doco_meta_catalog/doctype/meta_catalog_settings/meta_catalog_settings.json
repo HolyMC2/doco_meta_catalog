@@ -56,12 +56,12 @@
    "fieldname": "enabled",
    "fieldtype": "Check",
    "label": "Enabled",
-   "description": "Master switch. When off, no Item write triggers any Meta API call."
+   "description": "Turns on the Facebook, Instagram and WhatsApp catalog. Off: nothing is sent to Meta."
   },
   {
    "fieldname": "section_break_meta",
    "fieldtype": "Section Break",
-   "label": "Meta API"
+   "label": "Meta Connection"
   },
   {
    "depends_on": "enabled",
@@ -87,14 +87,14 @@
    "fieldtype": "Link",
    "label": "Reuse Token From WhatsApp Account",
    "options": "WhatsApp Account",
-   "description": "Optional. If set, the access_token of this WhatsApp Account is used (avoids duplicating tokens). Must have catalog_management scope."
+   "description": "Optional. Uses the connection of this WhatsApp account instead of a separate key."
   },
   {
    "depends_on": "eval:doc.enabled && !doc.whatsapp_account",
    "fieldname": "access_token",
    "fieldtype": "Password",
    "label": "Meta Access Token",
-   "description": "System User token with scopes: catalog_management (+ whatsapp_business_management if you also send product messages from here)."
+   "description": "Meta access key with catalog permission (and WhatsApp permission if you also send products from here)."
   },
   {
    "fieldname": "section_break_defaults",
@@ -150,6 +150,7 @@
   {
    "default": "1",
    "fieldname": "sync_only_website_items",
+   "hidden": 1,
    "fieldtype": "Check",
    "label": "Sync Only Website Items (deprecated)",
    "description": "DEPRECATED / no-op. The catalog now always mirrors the storefront gate (Item.publish_on_web=1 AND not disabled), so this flag is ignored. Kept only to avoid a data migration; remove in a later cleanup."
@@ -163,7 +164,7 @@
    "fieldname": "image_url_base",
    "fieldtype": "Data",
    "label": "Public Image URL Base",
-   "description": "Public HTTPS prefix Meta can crawl, e.g. https://ventas.docomexico.com. Item.image (relative path) gets prepended with this. If empty, frappe.utils.get_url() is used."
+   "description": "Public address of your shop for the photos (e.g. https://mitienda.mx). Empty = this site's address."
   },
   {
    "fieldname": "fallback_image_url",
@@ -175,7 +176,7 @@
    "fieldname": "section_break_category",
    "fieldtype": "Section Break",
    "label": "Category & Condition Mapping",
-   "description": "Optional. Map an Item Group to a Facebook condition (e.g. Seminuevos -> refurbished) and/or a google_product_category. Items in unmapped groups use the Default Condition above."
+   "description": "Optional. Set the condition (new, refurbished…) and the Google category for each item group. Groups without a row use the Default Condition above."
   },
   {
    "fieldname": "category_map",
@@ -205,14 +206,14 @@
    "fieldname": "section_break_inbound",
    "fieldtype": "Section Break",
    "label": "Inbound / Conversational",
-   "description": "Built-in WhatsApp menu (MA-2) and deep-link attribution (MA-6). Both default OFF; opt in per shop. The menu is an alternative to a chatflow, not a competitor."
+   "description": "WhatsApp menu and chat-link tracking. Both start off; turn them on per shop. The menu can work alongside automatic replies."
   },
   {
    "default": "0",
    "fieldname": "inbound_menu_enabled",
    "fieldtype": "Check",
-   "label": "Enable Inbound Menu (MA-2)",
-   "description": "When a customer taps a built-in menu button (Catálogo / Pedir / Pagar), reply with the matching interactive message. Send the menu via send_menu(to) from an operator or chatflow."
+   "label": "Enable WhatsApp Menu",
+   "description": "When the customer taps a menu button (Catálogo / Pedir / Pagar), reply with the matching message."
   },
   {
    "fieldname": "checkout_url",
@@ -228,21 +229,21 @@
    "default": "0",
    "fieldname": "deeplink_capture_enabled",
    "fieldtype": "Check",
-   "label": "Capture Deep-Link Refs (MA-6)",
-   "description": "Record a CRM Touchpoint when an inbound message carries a [ref:CODE] token from a wa.me deep link built by build_wa_link()."
+   "label": "Track Chat Links",
+   "description": "Records which WhatsApp chat link the customer came from."
   },
   {
    "fieldname": "business_whatsapp_number",
    "fieldtype": "Data",
    "label": "Business WhatsApp Number",
-   "description": "Dialable E.164 number (e.g. 5216691234567) used as the default for build_wa_link() wa.me links. The WhatsApp Account stores only the API phone_id, not this."
+   "description": "Business WhatsApp number with country code (e.g. 5216691234567) for chat links."
   },
   {
    "default": "0",
    "fieldname": "intake_enabled",
    "fieldtype": "Check",
-   "label": "Enable Flow Intake -> CRM Lead (MA-11)",
-   "description": "When a WhatsApp Flow completes, create a CRM Lead from the responses. Endpoint-free flow: the data arrives via the webhook (content_type=flow)."
+   "label": "Create Lead From WhatsApp Form",
+   "description": "When a customer completes a WhatsApp form, create a lead with the answers."
   },
   {
    "fieldname": "intake_flow_id",
@@ -254,21 +255,21 @@
    "default": "0",
    "fieldname": "media_capture_enabled",
    "fieldtype": "Check",
-   "label": "Capture Inbound Media -> Repair Order (MA-12)",
-   "description": "Attach an inbound photo/video to the sender's open Repair Order (e.g. a cracked-screen photo). No-op if taller is not installed or the sender has no open RO."
+   "label": "Attach Customer Photos to Repair Order",
+   "description": "Attach a photo or video the customer sends to their open repair order (e.g. a cracked screen). Does nothing if the customer has no open repair order."
   },
   {
    "fieldname": "section_break_capi",
    "fieldtype": "Section Break",
-   "label": "Conversions API (MA-3)",
-   "description": "Server-side Purchase/Lead events to a Meta dataset (Pixel). Uses a SEPARATE dataset-scoped token, not the catalog token. Default off."
+   "label": "Ad Conversions",
+   "description": "Sends sales and new leads to a Meta dataset (Pixel) to measure ads. Uses its own dataset key, not the catalog key. Off by default."
   },
   {
    "default": "0",
    "fieldname": "capi_enabled",
    "fieldtype": "Check",
-   "label": "Enable Conversions API",
-   "description": "When on, a submitted Sales Invoice emits Purchase and a new CRM Lead emits Lead (hashed PII, deduped by doc name)."
+   "label": "Send Conversions to Meta",
+   "description": "Tells Meta about sales and new leads (customer data is protected) to measure ads."
   },
   {
    "fieldname": "capi_dataset_id",
@@ -282,7 +283,7 @@
    "fieldtype": "Select",
    "label": "Purchase Action Source",
    "options": "website\nbusiness_messaging\nsystem_generated\nphysical_store",
-   "description": "action_source for Purchase events without a CTWA click. MA-4 overrides to business_messaging when a click is on file."
+   "description": "Where a sale is reported from when the customer did not come from a WhatsApp ad. Sales from a WhatsApp ad are always reported as WhatsApp."
   },
   {
    "fieldname": "column_break_capi",
@@ -292,7 +293,7 @@
    "fieldname": "capi_access_token",
    "fieldtype": "Password",
    "label": "Dataset Access Token",
-   "description": "Conversions API token for THIS dataset (Events Manager > Settings > Generate access token). Kept separate from the catalog token."
+   "description": "Access key for this dataset (Events Manager › Settings › Generate access token). Separate from the catalog key."
   },
   {
    "fieldname": "capi_test_event_code",

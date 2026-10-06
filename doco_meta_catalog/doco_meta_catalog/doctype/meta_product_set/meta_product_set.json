@@ -30,14 +30,14 @@
    "options": "item_group\nbrand\navailability\nmanual",
    "in_list_view": 1,
    "reqd": 1,
-   "description": "item_group -> filters product_type; brand -> filters brand; availability -> filters availability; manual -> Value is a raw Meta filter JSON."
+   "description": "How the product set is built: by item group, brand, availability, or a Meta filter (manual)."
   },
   {
    "fieldname": "value",
    "fieldtype": "Data",
    "label": "Value",
    "in_list_view": 1,
-   "description": "Group name / brand / availability ('in stock'), or a raw filter JSON for the manual dimension."
+   "description": "Group, brand or availability (\"in stock\"). For manual, a Meta filter."
   },
   {
    "default": "1",

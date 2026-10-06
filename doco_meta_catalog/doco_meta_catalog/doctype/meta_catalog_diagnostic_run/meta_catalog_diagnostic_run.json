@@ -37,6 +37,7 @@
   },
   {
    "fieldname": "scope_json",
+   "hidden": 1,
    "label": "Scope Json",
    "fieldtype": "Long Text"
   },

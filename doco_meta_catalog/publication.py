@@ -198,7 +198,7 @@ def _save(doc, state, reason, **values):
 
 def _worker_only():
     if getattr(frappe.local, "request", None):
-        frappe.throw("Catalog publication requires a worker.", frappe.PermissionError)
+        frappe.throw(frappe._("The Facebook catalog is still being set up on your system. Contact support."), frappe.PermissionError)
 
 
 def _prior_publication(doc):

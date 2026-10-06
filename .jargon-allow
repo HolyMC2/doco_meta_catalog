@@ -1,0 +1,10 @@
+# whole files: tests, drills, patches, operator-only tools
+# Runs during updates; its schema guards are read by support, not shop users.
+doco_meta_catalog/install.py
+# one field of one DocType file
+# Stored option codes; translations/es.csv gives each one its shop-word name.
+doco_meta_catalog/doco_meta_catalog/doctype/meta_catalog_settings/meta_catalog_settings.json::default_condition
+doco_meta_catalog/doco_meta_catalog/doctype/meta_catalog_settings/meta_catalog_settings.json::capi_purchase_source
+doco_meta_catalog/doco_meta_catalog/doctype/meta_catalog_category_map/meta_catalog_category_map.json::condition
+doco_meta_catalog/doco_meta_catalog/doctype/meta_order_log/meta_order_log.json::identity_state
+doco_meta_catalog/doco_meta_catalog/doctype/meta_product_set/meta_product_set.json::dimension

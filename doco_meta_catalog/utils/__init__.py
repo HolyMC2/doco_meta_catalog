@@ -16,7 +16,8 @@ def assert_outbound_allowed():
     CAPI events, and WA product messages.
     """
     if frappe.conf.get("meta_catalog_block_outbound"):
-        frappe.throw(
+        # Mirror and test sites only: tells support why nothing reached Meta.
+        frappe.throw(  # jargon-ok
             "Meta Catalog: outbound Meta writes are blocked on this site "
             "(site_config meta_catalog_block_outbound). This is a mirror/lab "
             "guard — the settings here point at the LIVE catalog."
