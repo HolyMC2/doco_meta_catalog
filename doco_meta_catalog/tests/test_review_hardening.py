@@ -111,16 +111,20 @@ class TestScopedPricingRules(unittest.TestCase):
         api.get_all.side_effect = lambda doctype, **kw: (
             ["Phones", "All Item Groups"] if doctype == "Item Group" else children)
         with patch.object(catalog_pricing, "frappe", api):
-            return catalog_pricing._applicable_rules(["SKU-1"], "2026-01-01")
+            return catalog_pricing._rule_hits(["SKU-1"], "2026-01-01")
 
     def test_unrelated_item_rule_does_not_block_catalog(self):
-        self.assertEqual(self.run_rules({"apply_on": "Item Code"}, ["OTHER"]), [])
-        self.assertEqual(self.run_rules({"apply_on": "Brand"}, ["B2"]), [])
+        self.assertEqual(self.run_rules({"apply_on": "Item Code"}, ["OTHER"]), ([], {}))
+        self.assertEqual(self.run_rules({"apply_on": "Brand"}, ["B2"]), ([], {}))
 
-    def test_rules_on_item_template_group_ancestor_or_transaction_apply(self):
-        self.assertEqual(self.run_rules({"apply_on": "Item Code"}, ["TPL-1"]), ["PR-1"])
-        self.assertEqual(self.run_rules({"apply_on": "Item Group"}, ["All Item Groups"]), ["PR-1"])
-        self.assertEqual(self.run_rules({"apply_on": "Transaction"}, []), ["PR-1"])
+    def test_rules_on_item_template_or_group_ancestor_hold_only_that_item(self):
+        self.assertEqual(self.run_rules({"apply_on": "Item Code"}, ["TPL-1"]), ([], {"SKU-1": ["PR-1"]}))
+        self.assertEqual(self.run_rules({"apply_on": "Item Group"}, ["All Item Groups"]), ([], {"SKU-1": ["PR-1"]}))
+        self.assertEqual(self.run_rules({"apply_on": "Brand"}, ["B1"]), ([], {"SKU-1": ["PR-1"]}))
+
+    def test_transaction_or_empty_rules_apply_everywhere(self):
+        self.assertEqual(self.run_rules({"apply_on": "Transaction"}, []), (["PR-1"], {}))
+        self.assertEqual(self.run_rules({"apply_on": "Item Code"}, []), (["PR-1"], {}))
 
     def test_missing_catalog_currency_is_explicit(self):
         with patch("doco_meta_catalog.catalog_pricing.frappe.throw", side_effect=frappe.ValidationError) as throw:

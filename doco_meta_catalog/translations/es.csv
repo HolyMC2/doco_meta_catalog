@@ -40,3 +40,149 @@ verified,Verificada
 item_group,Grupo de artículos
 brand,Marca
 availability,Disponibilidad
+Meta did not answer the connection check.,Meta no respondió la revisión de conexión.
+Meta does not list this catalog on the WhatsApp account.,Meta no muestra este catálogo en la cuenta de WhatsApp.
+Meta did not confirm the WhatsApp number.,Meta no confirmó el número de WhatsApp.
+The WhatsApp number is disconnected in Meta.,El número de WhatsApp está desconectado en Meta.
+Meta did not return the WhatsApp shop settings.,Meta no devolvió la configuración de tienda de WhatsApp.
+The catalog is hidden in WhatsApp (WhatsApp Manager → Catalog).,El catálogo está oculto en WhatsApp (WhatsApp Manager → Catálogo).
+Not checked yet.,Aún sin revisar.
+The last check is more than a day old.,La última revisión tiene más de un día.
+Waits for an earlier send whose result is unknown.,Espera un envío anterior cuyo resultado se desconoce.
+Waits for an earlier send to finish.,Espera a que termine un envío anterior.
+"Prices, stock or settings changed before sending; a newer send replaces it.","Precios, existencias o configuración cambiaron antes de enviar; un envío más nuevo lo reemplaza."
+The catalog settings were incomplete when it ran.,La configuración del catálogo estaba incompleta cuando se ejecutó.
+Meta did not answer clearly; the result is unknown.,Meta no respondió con claridad; el resultado se desconoce.
+The send was interrupted; the result is unknown.,El envío se interrumpió; el resultado se desconoce.
+Meta's batch status could not be read.,No se pudo leer el estado del lote en Meta.
+Meta never reported the batch as finished.,Meta nunca reportó el lote como terminado.
+Meta refused the request.,Meta rechazó la solicitud.
+Meta refused one or more products.,Meta rechazó uno o más productos.
+Sent; Meta's review shows up after the next check.,Enviado; la revisión de Meta aparece después de la siguiente revisión.
+Sent; waiting for Meta's batch result.,Enviado; esperando el resultado del lote en Meta.
+The catalog is larger than one check reads.,El catálogo es más grande de lo que lee una revisión.
+Meta stopped answering part way through the check.,Meta dejó de responder a mitad de la revisión.
+This is a test copy: nothing is sent to Meta from here.,Esta es una copia de prueba: desde aquí no se envía nada a Meta.
+The site setting meta_catalog_block_outbound stops every send.,La configuración del sitio meta_catalog_block_outbound detiene todos los envíos.
+The catalog is off. Nothing is sent to Meta.,El catálogo está apagado. No se envía nada a Meta.
+"Fill in the Catalog ID and the WhatsApp account below, then tick Enabled.",Llena el ID del catálogo y la cuenta de WhatsApp abajo y marca Activado.
+The connection to Meta is incomplete.,La conexión con Meta está incompleta.
+Set the Catalog ID and choose the WhatsApp account whose connection the catalog uses.,Pon el ID del catálogo y elige la cuenta de WhatsApp cuya conexión usa el catálogo.
+The catalog cannot be prepared.,No se puede preparar el catálogo.
+Open Pricing Rules,Abrir reglas de precios
+The last full send was stopped.,El último envío completo se detuvo.
+Send all now,Enviar todo ahora
+Choose the web shop this catalog copies.,Elige la tienda en línea que copia este catálogo.
+"This site has several shops; until one is chosen, every published product is sent and links use this site's address.","Este sitio tiene varias tiendas; hasta que elijas una, se envía todo producto publicado y los enlaces usan la dirección del sitio."
+"The shop has no domain, so product links open this site.","La tienda no tiene dominio, así que los enlaces de producto abren este sitio."
+"Add the shop's address under Dominios, or set Product Page Address below.","Agrega la dirección de la tienda en Dominios, o llena Dirección de página de producto abajo."
+Open the shop,Abrir la tienda
+Shoppers cannot see any product yet.,Los compradores aún no ven ningún producto.
+"All {0} products on Meta are hidden (staging). They show on Facebook, Instagram and WhatsApp once set to visible.","Los {0} productos en Meta están ocultos (staging). Aparecen en Facebook, Instagram y WhatsApp cuando los pones visibles."
+Show products to shoppers,Mostrar productos a los compradores
+"Every product the shop publishes becomes visible on Facebook, Instagram and WhatsApp. Continue?","Todo producto que publica la tienda se vuelve visible en Facebook, Instagram y WhatsApp. ¿Continuar?"
+New products are sent hidden (staging).,Los productos nuevos se envían ocultos (staging).
+Shoppers see them only after you switch them to visible.,Los compradores los ven solo cuando los pones visibles.
+{0} products keep their last price on Meta until their price is fixed.,{0} productos conservan su último precio en Meta hasta que se corrija su precio.
+Open these prices,Abrir estos precios
+Meta has not been checked yet.,Meta aún no se ha revisado.
+"A check reads what Meta shows for every product: review, visibility and channels.","Una revisión lee lo que Meta muestra de cada producto: revisión, visibilidad y canales."
+Check Meta now,Revisar Meta ahora
+Meta was last checked on {0}.,Meta se revisó por última vez el {0}.
+The daily check has not run since then.,La revisión diaria no ha corrido desde entonces.
+WhatsApp does not show the catalog yet.,WhatsApp aún no muestra el catálogo.
+Meta refused {0} products.,Meta rechazó {0} productos.
+"Open Commerce Manager → Catalog → Issues for Meta's reason, or open the product to see it.","Abre Commerce Manager → Catálogo → Problemas para ver la razón de Meta, o abre el producto."
+See the refused products,Ver los productos rechazados
+{0} sends have an unknown result.,{0} envíos tienen resultado desconocido.
+The products in them are not sent again until someone reviews the send.,Sus productos no se vuelven a enviar hasta que alguien revise el envío.
+Review them,Revisarlos
+{0} products have no photo and are not sent.,{0} productos no tienen foto y no se envían.
+"Meta needs a public photo for every product. Add one, or set a Fallback Image URL below.","Meta necesita una foto pública por producto. Agrega una, o llena la imagen de respaldo abajo."
+Open products without photo,Abrir productos sin foto
+{0} products have no price in {1} and are not sent.,{0} productos no tienen precio en {1} y no se envían.
+{0} products are left out by the category list below.,{0} productos quedan fuera por la lista de categorías de abajo.
+"Its variants are sent one by one, each with its own price and stock.","Sus variantes se envían una por una, cada una con su precio y existencias."
+"Not published in the web shop, so it is not sent.","No está publicado en la tienda en línea, así que no se envía."
+"The web shop does not show it (hidden, or outside the shop's catalog).","La tienda en línea no lo muestra (oculto, o fuera del catálogo de la tienda)."
+No price in the shop's price list.,Sin precio en la lista de precios de la tienda.
+No public photo.,Sin foto pública.
+Its category is left out of the catalog.,Su categoría queda fuera del catálogo.
+Choose visible or hidden.,Elige visible u oculto.
+A pricing rule ({0}) changes this price for some customers or quantities.,Una regla de precios ({0}) cambia este precio para algunos clientes o cantidades.
+{0} current prices in {1} ({2}). Keep one.,{0} precios vigentes en {1} ({2}). Deja uno.
+Turn the catalog on and set its Catalog ID first.,Primero activa el catálogo y pon su ID de catálogo.
+Catalog ID must be the numeric Meta catalog identifier.,El ID del catálogo debe ser el identificador numérico de Meta.
+Graph API version must look like v21.0.,La versión de Graph API debe verse como v21.0.
+Set the catalog currency before enabling the catalog.,Pon la moneda del catálogo antes de activarlo.
+The web shop {0} is turned off. Choose an enabled shop or leave it empty.,La tienda en línea {0} está apagada. Elige una tienda activa o déjalo vacío.
+"Product Page Address must look like https://mitienda.mx, without a path.","La dirección de página de producto debe verse como https://mitienda.mx, sin ruta."
+No photo,Sin foto
+No price,Sin precio
+Two prices,Dos precios
+Pricing rule,Regla de precios
+Category left out,Categoría excluida
+Send every product to Meta now? It takes a few minutes.,¿Enviar todos los productos a Meta ahora? Tarda unos minutos.
+Sending every product. Results show here in a few minutes.,Enviando todos los productos. Los resultados aparecen aquí en unos minutos.
+Checking what Meta shows. Refresh this page in a few minutes.,Revisando lo que muestra Meta. Actualiza esta página en unos minutos.
+Look up a product,Buscar un producto
+Preview the catalog,Vista previa del catálogo
+Reading the catalog…,Leyendo el catálogo…
+The overview could not be loaded.,No se pudo cargar el resumen.
+visible,visibles
+hidden,ocultos
+not checked yet,aún sin revisar
+Ready to send,Listos para enviar
+from shop {0},de la tienda {0}
+On Meta,En Meta
+Not sent,No enviados
+Last full send,Último envío completo
+Everything is in order.,Todo está en orden.
+Web shop,Tienda en línea
+none chosen,ninguna elegida
+WhatsApp catalog,Catálogo de WhatsApp
+cart on,carrito activo
+Sends,Envíos
+Products read {0},Productos leídos {0}
+Meta checked {0},Meta revisado {0}
+What needs you,Lo que necesita tu atención
+Facebook shop,Tienda de Facebook
+Instagram shopping,Compras en Instagram
+Ads,Anuncios
+Done. The overview refreshes now.,Listo. El resumen se actualiza ahora.
+Send this product now,Enviar este producto ahora
+Queued. Meta shows the change after the next check.,En cola. Meta muestra el cambio después de la siguiente revisión.
+The catalog is off.,El catálogo está apagado.
+Sent to Meta,Enviado a Meta
+Kept as Meta has it,Se queda como lo tiene Meta
+Product with variants,Producto con variantes
+Not published,No publicado
+Not in the web shop,No está en la tienda en línea
+Shoppers see it,Los compradores lo ven
+No (hidden),No (oculto)
+Product page,Página del producto
+Last send,Último envío
+Meta review,Revisión de Meta
+Channels,Canales
+Meta says,Meta dice
+Reading every product…,Leyendo todos los productos…
+page,página
+What a full send would do,Lo que haría un envío completo
+{0} products would be sent; {1} are left out.,Se enviarían {0} productos; {1} quedan fuera.
+Meta review: {0},Revisión de Meta: {0}
+"Meta catalog: {0}, {1}, {2}","Catálogo de Meta: {0}, {1}, {2}"
+visible to shoppers,visible para los compradores
+Meta catalog: kept at its last price. {0},Catálogo de Meta: se queda con su último precio. {0}
+Meta catalog: {0},Catálogo de Meta: {0}
+Meta catalog: not sent. {0},Catálogo de Meta: no enviado. {0}
+Send to Meta now,Enviar a Meta ahora
+Queued for Meta.,En cola para Meta.
+Items Stored,Productos guardados
+Off for the daily summary check: per-item rows are kept from the weekly and manual checks.,Apagado en la revisión diaria de resumen: las filas por producto se guardan en las revisiones semanales y manuales.
+Overview,Resumen
+Shop,Tienda
+Web Shop,Tienda en línea
+"The web shop this catalog copies: its products, hidden items, prices, stock and product pages. Empty = the only enabled shop.","La tienda en línea que copia este catálogo: sus productos, ocultos, precios, existencias y páginas de producto. Vacío = la única tienda activa."
+Product Page Address,Dirección de página de producto
+"Where a shopper lands from Facebook or Instagram, e.g. https://mitienda.mx. Empty = the shop's first domain.","A dónde llega un comprador desde Facebook o Instagram, p. ej. https://mitienda.mx. Vacío = el primer dominio de la tienda."
+hidden from shoppers,oculto para los compradores

@@ -4,14 +4,22 @@ Source of truth = the storefront's PUBLISHED + SELLABLE view (``doco.docoutils.s
 so the Facebook / Instagram / WhatsApp catalog matches the live web shop EXACTLY:
 
   - gate:         ``Item.publish_on_web == 1`` AND not disabled   (NOT ``show_in_website``)
-  - price:        ``Item Price.price_list_rate`` in the selling price list (NOT ``standard_rate``)
-  - availability: live Bin ``actual_qty - reserved_qty``; non-stock items (services) always available
+                  AND in the mirrored shop's scope (catalog scope, hidden items, groups)
+  - price:        ``Item Price.price_list_rate`` in the shop's price list (NOT ``standard_rate``)
+  - availability: live Bin ``actual_qty - reserved_qty`` in the shop's warehouses;
+                  non-stock items (services) always available
   - image:        public ``/files`` or ``https`` only — never ``/private`` or a signed B2/S3 URL
                   (Meta scrapes anonymously; a 401 image silently drops the item)
+  - link:         the shop's product page, ``<shop domain>/producto/<code>``; a variant links
+                  to its template's page (the storefront has no page per variant)
 
 Variants are pushed as individual ``retailer_id``s grouped under their template via
 ``item_group_id`` (Meta's native variant grouping). Templates (``has_variants=1``) are
 never pushed — their priced variants are.
+
+An item whose price is ambiguous (two current prices, or its own pricing rule) is HELD:
+it is neither updated nor removed on Meta, and the reason is shown to the shop. Only a
+rule that applies to every item stops the whole catalog.
 
 Public hooks (wired from hooks.py):
     queue_item_sync(doc, method)     Item.on_update
@@ -59,6 +67,35 @@ def _get_settings():
     return s
 
 
+def _shop(settings) -> tuple[dict | None, str]:
+    """The web shop this catalog mirrors: (storefront profile or None, public origin).
+
+    The catalog uses the shop's catalog scope, hidden items, price list and warehouses, and
+    links to the shop's own domain. An empty setting picks the only enabled shop; with none
+    or several, the cell defaults apply and links use this site's address."""
+    name = (settings.get("storefront") or "").strip()
+    if not name and frappe.db.exists("DocType", "Storefront Profile"):
+        enabled = frappe.get_all("Storefront Profile", filters={"enabled": 1}, pluck="name", limit=2)
+        name = enabled[0] if len(enabled) == 1 else ""
+    profile = sf._profile(name) if name else None
+    origin = (settings.get("product_link_base") or "").strip().rstrip("/")
+    if not origin and name:
+        domains = frappe.db.get_value("Storefront Profile", name, "domains") or ""
+        host = next((line.strip() for line in domains.splitlines() if line.strip()), "")
+        if host:
+            origin = "https://" + host.split("://", 1)[-1].strip("/").lower()
+    return profile, origin or get_url().rstrip("/")
+
+
+def _product_link(origin: str, item: dict) -> str:
+    page = item.get("variant_of") or item["name"]
+    return f"{origin}/producto/{urlquote(sf._slugify(page), safe='')}"
+
+
+# Kinds of skipped item. A held item keeps whatever Meta already shows.
+HELD_KINDS = {"duplicate_price", "price_rule"}
+
+
 def _group_overrides(settings) -> dict:
     """``{item_group: {"condition": .., "google_product_category": ..}}`` from the optional
     Meta Catalog Category Map child table. Lets a shop map e.g. ``Seminuevos -> refurbished``
@@ -83,10 +120,11 @@ _LEAF_FIELDS = ["name", "item_name", "description", "item_group", "image", "bran
                 "default_manufacturer_part_no"]
 
 
-def _eligible_leaves(item_codes: list[str] | None = None, *, lock=False) -> list[dict]:
+def _eligible_leaves(item_codes: list[str] | None = None, *, lock=False, profile=None) -> list[dict]:
     """Published, sellable LEAF items (``has_variants=0``) — the same universe the storefront
     sells. Variant leaves ARE included (each a real sellable Item with its own Bin + Item
-    Price); they group on Meta via ``item_group_id``. Templates are excluded."""
+    Price); they group on Meta via ``item_group_id``. Templates are excluded. With a shop
+    ``profile``, only the items that shop's product pages serve."""
     filters: dict = {"publish_on_web": 1, "disabled": 0, "has_variants": 0}
     if item_codes is not None:
         if not item_codes:
@@ -107,6 +145,11 @@ def _eligible_leaves(item_codes: list[str] | None = None, *, lock=False) -> list
             )
         )
         leaves = [l for l in leaves if not l.get("variant_of") or l.get("variant_of") in live]
+    if profile and leaves:
+        # The product page's own gate: catalog scope + hidden items + included/excluded
+        # groups; a variant follows its template. An item the shop hides stays off Meta.
+        shown = sf._scoped_products([l["name"] for l in leaves], profile)
+        leaves = [l for l in leaves if l["name"] in shown]
     return leaves
 
 
@@ -195,10 +238,12 @@ def _public_image(item: dict, settings, *, images=None, lock=False) -> str | Non
 def _build_payloads(item_codes: list[str] | None, settings, *, lock=False) -> tuple[list[dict], list[dict]]:
     """Build the items_batch ``requests`` array for the eligible items.
 
-    Returns ``(requests, skipped)`` where each ``skipped`` is ``{code, reason}``. An item is
-    skipped (never sent) when it has no selling price or no public image — exactly the cases
-    the storefront would also refuse to sell, so the two surfaces stay identical."""
-    leaves = _eligible_leaves(item_codes, lock=lock)
+    Returns ``(requests, skipped)`` where each ``skipped`` is ``{code, kind, reason}``. An item
+    is skipped (never sent) when it has no selling price or no public image — exactly the cases
+    the storefront would also refuse to sell, so the two surfaces stay identical. Kinds in
+    ``HELD_KINDS`` are price problems on one item: callers keep that item as Meta has it."""
+    profile, origin = _shop(settings)
+    leaves = _eligible_leaves(item_codes, lock=lock, profile=profile)
     if not leaves:
         return [], []
 
@@ -208,9 +253,15 @@ def _build_payloads(item_codes: list[str] | None, settings, *, lock=False) -> tu
     gtins = sf._feed_gtins(names, lock=lock)
     from doco_meta_catalog.catalog_pricing import quote
 
-    pricing = quote(names, settings, lock=lock)
+    pricing = quote(names, settings, lock=lock, hold=True,
+                    price_list=profile["price_list"] if profile else None)
     prices = pricing["base_rates"]
-    levels = sf._stock_levels(names, lock=lock)  # 'out' | 'low' | 'in'; services always 'in'
+    held = pricing.get("held") or {}
+    # 'out' | 'low' | 'in'; services always 'in'
+    if profile:
+        levels = sf._stock_levels(names, profile["warehouses"], profile["low_threshold"], lock=lock)
+    else:
+        levels = sf._stock_levels(names, lock=lock)
     # Generic catalog prices cannot safely quote customer/quantity Pricing Rules.
     # quote() visibly blocks that configuration; never call _sale_prices here:
     # it elevates, inserts a throwaway Sales Order and rolls back the caller.
@@ -220,7 +271,6 @@ def _build_payloads(item_codes: list[str] | None, settings, *, lock=False) -> tu
     from doco_meta_catalog.catalog_pricing import catalog_currency
 
     currency = catalog_currency(settings)
-    base_url = (settings.image_url_base or get_url()).rstrip("/")
     # staging = synced to the catalog but NOT shown on public FB/IG (review-first); published = live.
     default_visibility = settings.default_visibility or "staging"
     # No shop name is baked into settings; an unset brand is the tenant's own company.
@@ -236,15 +286,19 @@ def _build_payloads(item_codes: list[str] | None, settings, *, lock=False) -> tu
         code = it["name"]
         ov = overrides.get(it.get("item_group") or "", {})
         if ov.get("exclude"):
-            skipped.append({"code": code, "reason": "item group excluded from Meta catalog"})
+            skipped.append({"code": code, "kind": "excluded", "reason": "item group excluded from Meta catalog"})
+            continue
+        if code in held:
+            skipped.append({"code": code, **held[code]})
             continue
         rate = prices.get(code)
         if not rate:
-            skipped.append({"code": code, "reason": "no Item Price in selling price list"})
+            skipped.append({"code": code, "kind": "unpriced", "reason": "no Item Price in selling price list"})
             continue
         img = _public_image(it, settings, images=images, lock=lock)
         if not img:
-            skipped.append({"code": code, "reason": "no public image (private/signed/missing, no fallback)"})
+            skipped.append({"code": code, "kind": "no_image",
+                            "reason": "no public image (private/signed/missing, no fallback)"})
             continue
         # variant title/group: name the group after the TEMPLATE (+ optional model split) so a
         # template's variants don't surface under one variant's name; color = the variant option.
@@ -264,7 +318,7 @@ def _build_payloads(item_codes: list[str] | None, settings, *, lock=False) -> tu
             "availability": _availability(levels.get(code, "out")),
             "condition": ov.get("condition") or settings.default_condition or "new",
             "price": _format_price(flt(rate) * markup, currency),
-            "link": f"{base_url}/shop/{urlquote(code, safe='')}",
+            "link": _product_link(origin, it),
             "image_link": img,
             "brand": it.get("brand") or brand,
             "visibility": ov.get("visibility") or default_visibility,
@@ -449,7 +503,11 @@ def _push_one(item_name, request_id=None, expected_scope=None):
     try:
         if expected_scope and publication.scope(s)["scope_revision"] != expected_scope:
             return {"state": "Blocked", "reason_code": "catalog_binding_changed"}
-        reqs, _ = _build_payloads([item_name], s)
+        reqs, skipped = _build_payloads([item_name], s)
+        held = [row for row in skipped if row["kind"] in HELD_KINDS]
+        if held:
+            # Meta keeps its last good price until the shop fixes this one.
+            return {"state": "Blocked", "reason_code": "catalog_price_review", "detail": held[0]["reason"][:200]}
         if not reqs:
             # Lost eligibility means removal, but only of IDs this binding published.
             if item_name not in publication.known_items(s):
@@ -483,16 +541,17 @@ def full_reconcile():
         })
         return {"state": "Blocked", "reason_code": "canonical_price_or_source_unavailable"}
     desired = {row["data"]["id"] for row in reqs}
-    removed = sorted(set(publication.known_items(s)) - desired)
+    held = {row["code"] for row in skipped if row["kind"] in HELD_KINDS}
+    removed = sorted(set(publication.known_items(s)) - desired - held)
     operations = reqs + [{"method": "DELETE", "data": {"id": code}} for code in removed]
     queued = [_post_items_batch(s, operations[i:i + _BATCH_CHUNK])
               for i in range(0, len(operations), _BATCH_CHUNK)]
-    status = f"QUEUED: {len(reqs)} updates, {len(removed)} removals; batch results and diagnostics pending"
+    status = f"QUEUED: {len(reqs)} updates, {len(removed)} removals, {len(held)} held for price review"
     frappe.db.set_single_value(SETTINGS_DOCTYPE, {
         "last_full_reconcile": frappe.utils.now(), "last_full_reconcile_status": status[:140], "last_error": "",
     })
     return {"state": "Queued", "publications": queued, "updates": len(reqs),
-            "removals": len(removed), "skipped": len(skipped)}
+            "removals": len(removed), "held": len(held), "skipped": len(skipped)}
 
 
 # ---------------- whitelisted admin actions ----------------
@@ -519,15 +578,27 @@ def dry_run(limit: int = 20):
     Meta feed can be eyeballed for parity against the live storefront BEFORE a real
     catalog_id/token is wired. Works even when the master gate is off."""
     frappe.only_for("System Manager")
-    s = frappe.get_cached_doc(SETTINGS_DOCTYPE)  # bypass _get_settings: dry_run needs no catalog/token
-    n = int(limit or 20)
-    reqs, skipped = _build_payloads(None, s)
+    s = frappe.get_doc(SETTINGS_DOCTYPE)  # bypass _get_settings: dry_run needs no catalog/token
+    return preview(s, int(limit or 20))
+
+
+def preview(settings, limit=20) -> dict:
+    """What a full sync would send, and every item it would leave out, grouped by why."""
+    profile, origin = _shop(settings)
+    reqs, skipped = _build_payloads(None, settings)
+    by_kind: dict[str, list] = {}
+    for row in skipped:
+        by_kind.setdefault(row["kind"], []).append(row)
     return {
         "eligible": len(reqs),
         "skipped": len(skipped),
-        "skipped_detail": skipped[:n],
-        "sample": [r["data"] for r in reqs[:n]],
-        "price_list": sf._selling_price_list(),
-        "settings_enabled": bool(s.enabled),
-        "catalog_id_set": bool(s.catalog_id),
+        "skipped_detail": skipped[:limit],
+        "by_kind": {kind: len(rows) for kind, rows in by_kind.items()},
+        "examples": {kind: rows[:limit] for kind, rows in by_kind.items()},
+        "sample": [r["data"] for r in reqs[:limit]],
+        "shop": profile["name"] if profile else None,
+        "link_origin": origin,
+        "price_list": profile["price_list"] if profile else sf._selling_price_list(),
+        "settings_enabled": bool(settings.enabled),
+        "catalog_id_set": bool(settings.catalog_id),
     }

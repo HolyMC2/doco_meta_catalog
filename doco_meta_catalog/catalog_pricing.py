@@ -3,6 +3,7 @@
 import math
 
 import frappe
+from frappe import _
 from frappe.utils import flt, today
 
 
@@ -13,14 +14,15 @@ def catalog_currency(settings):
     return currency
 
 
-def _applicable_rules(codes, day, *, lock=False):
-    """Active automatic selling rules that can change a price of these items.
+def _rule_hits(codes, day, *, lock=False):
+    """Active automatic selling rules that can change a price of these items:
+    (rules that apply to every item, {code: rules that apply to that item}).
 
     A promotion on unrelated items must not block the whole catalog. Transaction-wide
-    or unrecognised rules still apply to everything.
+    or unrecognised rules, and rules with no rows, still apply to everything.
     """
     if not codes:
-        return []
+        return [], {}
     rules = frappe.db.get_values(
         "Pricing Rule",
         filters={"selling": 1, "disable": 0, "coupon_code_based": 0},
@@ -35,57 +37,83 @@ def _applicable_rules(codes, day, *, lock=False):
         and (not row.valid_upto or str(row.valid_upto) >= day)
     ]
     if not rules:
-        return []
+        return [], {}
     items = frappe.db.get_values(
         "Item", filters={"name": ["in", list(codes)]},
         fieldname=["name", "variant_of", "item_group", "brand"], limit=None, as_dict=True,
     )
-    # ERPNext applies a template's rules to its variants.
-    item_codes = {row.name for row in items} | {row.variant_of for row in items if row.variant_of}
-    brands = {row.brand for row in items if row.brand}
-    groups = set()
+    ancestors = {}
     for group in {row.item_group for row in items if row.item_group}:
         bounds = frappe.db.get_value("Item Group", group, ["lft", "rgt"], as_dict=True)
         if bounds:
-            groups.update(frappe.get_all("Item Group", filters={
+            ancestors[group] = set(frappe.get_all("Item Group", filters={
                 "lft": ["<=", bounds.lft], "rgt": [">=", bounds.rgt]}, pluck="name"))
-    children = {
-        "Item Code": ("Pricing Rule Item Code", "item_code", item_codes),
-        "Item Group": ("Pricing Rule Item Group", "item_group", groups),
-        "Brand": ("Pricing Rule Brand", "brand", brands),
+    # ERPNext applies a template's rules to its variants.
+    keys = {
+        row.name: {
+            "Item Code": {row.name, row.variant_of} - {None, ""},
+            "Item Group": ancestors.get(row.item_group, set()),
+            "Brand": {row.brand} if row.brand else set(),
+        }
+        for row in items
     }
-    applicable = []
+    children = {
+        "Item Code": ("Pricing Rule Item Code", "item_code"),
+        "Item Group": ("Pricing Rule Item Group", "item_group"),
+        "Brand": ("Pricing Rule Brand", "brand"),
+    }
+    everywhere, per_item = [], {}
     for rule in rules:
         if rule.apply_on not in children:
-            applicable.append(rule.name)
+            everywhere.append(rule.name)
             continue
-        doctype, field, wanted = children[rule.apply_on]
-        values = frappe.get_all(doctype, filters={"parent": rule.name, "parenttype": "Pricing Rule"},
-                                pluck=field)
-        if not values or wanted.intersection(values):
-            applicable.append(rule.name)
-    return applicable
+        doctype, field = children[rule.apply_on]
+        values = set(frappe.get_all(doctype, filters={"parent": rule.name, "parenttype": "Pricing Rule"},
+                                    pluck=field))
+        if not values:
+            everywhere.append(rule.name)
+            continue
+        for code, wanted in keys.items():
+            if wanted[rule.apply_on] & values:
+                per_item.setdefault(code, []).append(rule.name)
+    return everywhere, per_item
 
 
-def quote(codes, settings, *, lock=False):
+def quote(codes, settings, *, lock=False, price_list=None, hold=False):
     """One current generic Item Price in the configured list, stock UOM and currency.
 
     Automatic rules can depend on party, quantity and company. A generic catalog
     cannot assert that price. Surface a blocker instead of silently dropping a
     discount or running the storefront's throwaway Sales Order/rollback helper.
     Reviewed orders must show their separate native ERP quote before creation.
+
+    ``hold=True`` (catalog publication) keeps one item's price problem from stopping
+    the whole catalog: an item with duplicate current prices or its own pricing rule
+    comes back in ``held`` with the reason, and gets no rate. Rules that apply to every
+    item still stop everything. Orders keep the strict default.
     """
     day = today()
-    if _applicable_rules(codes, day, lock=lock):
+    everywhere, per_item = _rule_hits(codes, day, lock=lock)
+    if everywhere or (per_item and not hold):
         frappe.throw(
             "Automatic pricing rules require an explicit customer/quantity quote. Generic catalog pricing is unavailable."
         )
-    if lock:
+    held = {
+        code: {
+            "kind": "price_rule",
+            "reason": _("A pricing rule ({0}) changes this price for some customers or quantities.").format(
+                ", ".join(names)
+            ),
+        }
+        for code, names in per_item.items()
+    }
+    # The shop's own list when the catalog mirrors a storefront; else the default list.
+    if not price_list and lock:
         configured_list = frappe.db.sql(
             "SELECT value FROM tabSingles WHERE doctype='Selling Settings' AND field='selling_price_list' FOR UPDATE"
         )
         price_list = configured_list[0][0] if configured_list else None
-    else:
+    elif not price_list:
         price_list = frappe.db.get_single_value(
             "Selling Settings", "selling_price_list"
         )
@@ -171,15 +199,22 @@ def quote(codes, settings, *, lock=False):
         ):
             continue
         grouped.setdefault(row.item_code, []).append(flt(row.price_list_rate))
-    ambiguous = [code for code, rates in grouped.items() if len(rates) != 1]
-    if ambiguous:
+    ambiguous = {code: rates for code, rates in grouped.items() if len(rates) != 1}
+    if ambiguous and not hold:
         frappe.throw(
             "More than one current generic Item Price exists. Resolve duplicate catalog prices before publication."
         )
+    for code, rates in ambiguous.items():
+        held.setdefault(code, {
+            "kind": "duplicate_price",
+            "reason": _("{0} current prices in {1} ({2}). Keep one.").format(
+                len(rates), price_list, ", ".join(f"{rate:.2f}" for rate in sorted(rates))
+            ),
+        })
     base = {
         code: rates[0]
         for code, rates in grouped.items()
-        if math.isfinite(rates[0]) and rates[0] > 0
+        if code not in held and math.isfinite(rates[0]) and rates[0] > 0
     }
     markup = flt(settings.price_markup_percent)
     if not math.isfinite(markup) or not 0 <= markup <= 10000:
@@ -192,5 +227,6 @@ def quote(codes, settings, *, lock=False):
             code: flt(rate * (1 + markup / 100), 2) for code, rate in base.items()
         },
         "markup": markup,
+        "held": held,
         "source": "Current generic Item Price; catalog markup applied; automatic rules unavailable",
     }

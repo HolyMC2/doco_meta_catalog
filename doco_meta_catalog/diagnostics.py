@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import frappe
-from frappe.utils import now_datetime
+from frappe import _
+from frappe.utils import getdate, now_datetime
 
 from doco_meta_catalog import (
     connection,
@@ -95,6 +96,40 @@ def run_diagnostics(store=1):
     settings = sync._get_settings()
     if not settings:
         frappe.throw("Meta catalog is not enabled / configured.")
+    return _run(settings, store=bool(int(store)))
+
+
+@frappe.whitelist(methods=["POST"])
+def queue_check():
+    """Desk «Check Meta now»: a full read can take minutes, so it runs as a job."""
+    frappe.only_for("System Manager")
+    if not sync._get_settings():
+        frappe.throw(_("Turn the catalog on and set its Catalog ID first."))
+    frappe.enqueue("doco_meta_catalog.diagnostics.manual_check", queue="long", timeout=1800,
+                   job_id="meta-catalog-check", deduplicate=True)
+    return {"queued": True}
+
+
+def manual_check():
+    settings = sync._get_settings()
+    if settings:
+        _run(settings)
+
+
+def daily_check():
+    """Scheduled read of what Meta shows. GETs only.
+
+    Every day stores the summary the management page reads. Per-item rows are history
+    that is never deleted, so they are stored weekly (Sunday) and on manual checks: a daily
+    copy of a 3,000-item catalog would add about a million rows a year. Mirror sites carry
+    the live catalog binding and skip the scheduled read."""
+    settings = sync._get_settings()
+    if not settings or frappe.conf.get("meta_catalog_block_outbound"):
+        return
+    _run(settings, store_items=getdate().weekday() == 6)
+
+
+def _run(settings, *, store=True, store_items=True):
     identity = publication.scope(settings)
     # The source snapshot is taken once. It is an observed comparison, not a claim
     # that catalog/source stayed unchanged during this non-atomic provider scan.
@@ -105,10 +140,12 @@ def run_diagnostics(store=1):
         expected = None
         source_reason = "canonical_price_or_source_unavailable"
     fetched = _fetch(settings)
-    by_review, by_channel, actionable = {}, {}, []
+    by_review, by_channel, by_visibility, actionable = {}, {}, {}, []
     for item in fetched["items"]:
         review = item.get("review_status") or "unknown"
         by_review[review] = by_review.get(review, 0) + 1
+        visibility = item.get("visibility") or "unknown"
+        by_visibility[visibility] = by_visibility.get(visibility, 0) + 1
         caps = _caps(item)
         for capability, status in caps.items():
             by_channel.setdefault(capability, {})
@@ -130,6 +167,7 @@ def run_diagnostics(store=1):
         "total": len(fetched["items"]),
         "by_review": by_review,
         "by_channel": by_channel,
+        "by_visibility": by_visibility,
         "actionable": len(actionable),
         "sample": actionable[:10],
         "drift": contract.drift(
@@ -143,7 +181,7 @@ def run_diagnostics(store=1):
         "checked_at": str(now_datetime()),
         "connection": connection.observe(settings),
     }
-    if int(store):
+    if store:
         run = publication.mark(
             frappe.get_doc(
                 {
@@ -154,11 +192,13 @@ def run_diagnostics(store=1):
                     "checked_at": summary["checked_at"],
                     "pages": fetched["pages"],
                     "observed_count": summary["total"],
+                    "items_stored": int(store_items),
                     "summary": contract.canonical(summary),
                 }
             )
         ).insert(ignore_permissions=True)
-        _store(run, fetched["items"])
+        if store_items:
+            _store(run, fetched["items"])
         summary["diagnostic_run"] = run.name
     return summary
 
@@ -197,7 +237,7 @@ def item_diagnostic(retailer_id):
     identity = publication.scope(settings)
     run = frappe.db.get_value(
         publication.RUN,
-        {"scope_revision": identity["scope_revision"]},
+        {"scope_revision": identity["scope_revision"], "items_stored": 1},
         ["name", "state", "checked_at", "reason_code"],
         as_dict=True,
         order_by="creation desc, name desc",

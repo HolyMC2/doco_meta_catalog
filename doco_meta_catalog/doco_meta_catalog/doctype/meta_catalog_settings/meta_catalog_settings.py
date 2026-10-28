@@ -18,6 +18,16 @@ class MetaCatalogSettings(Document):
             frappe.throw(_("Graph API version must look like v21.0."))
         if self.enabled and not self.default_currency:
             frappe.throw(_("Set the catalog currency before enabling the catalog."))
+        if self.storefront and not frappe.db.get_value("Storefront Profile", self.storefront, "enabled"):
+            frappe.throw(_("The web shop {0} is turned off. Choose an enabled shop or leave it empty.").format(
+                self.storefront))
+        if self.product_link_base:
+            from urllib.parse import urlsplit
+
+            self.product_link_base = self.product_link_base.strip().rstrip("/")
+            parsed = urlsplit(self.product_link_base)
+            if parsed.scheme != "https" or not parsed.hostname or parsed.path or parsed.query:
+                frappe.throw(_("Product Page Address must look like https://mitienda.mx, without a path."))
 
     def get_token(self):
         if self.whatsapp_account:

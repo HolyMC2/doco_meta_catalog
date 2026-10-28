@@ -304,15 +304,20 @@ def reconcile_unknown(name, request_id, note):
     for code in codes:
         if frappe.db.exists("Item", code):
             frappe.get_doc("Item", code, for_update=True).check_permission("read")
-    from doco_meta_catalog.sync import _build_payloads
+    from doco_meta_catalog.sync import HELD_KINDS, _build_payloads
 
-    desired, _ = _build_payloads(codes, settings, lock=True)
-    present = {row["data"]["id"] for row in desired}
+    desired, skipped = _build_payloads(codes, settings, lock=True)
+    # A held item (price under review) is left as Meta has it, never removed.
+    present = {row["data"]["id"] for row in desired} | {
+        row["code"] for row in skipped if row["kind"] in HELD_KINDS
+    }
     desired += [
         {"method": "DELETE", "data": {"id": code}}
         for code in codes
         if code not in present
     ]
+    if not desired:
+        frappe.throw("Every item in this publication is held for price review. Fix the prices first.")
     result = queue(
         settings, desired, request_id=resolution_name, reconciles=previous.name
     )

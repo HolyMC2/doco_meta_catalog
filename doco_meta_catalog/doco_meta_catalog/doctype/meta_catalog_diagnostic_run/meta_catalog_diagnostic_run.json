@@ -14,6 +14,7 @@
   "checked_at",
   "pages",
   "observed_count",
+  "items_stored",
   "summary"
  ],
  "fields": [
@@ -68,6 +69,13 @@
    "fieldname": "observed_count",
    "label": "Observed Count",
    "fieldtype": "Int"
+  },
+  {
+   "fieldname": "items_stored",
+   "label": "Items Stored",
+   "fieldtype": "Check",
+   "default": "1",
+   "description": "Off for the daily summary check: per-item rows are kept from the weekly and manual checks."
   },
   {
    "fieldname": "summary",

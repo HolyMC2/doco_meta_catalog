@@ -5,6 +5,8 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
+  "overview_html",
+  "section_break_settings",
   "enabled",
   "section_break_meta",
   "catalog_id",
@@ -12,6 +14,10 @@
   "column_break_meta",
   "whatsapp_account",
   "access_token",
+  "section_break_shop",
+  "storefront",
+  "column_break_shop",
+  "product_link_base",
   "section_break_defaults",
   "default_currency",
   "default_brand",
@@ -51,6 +57,16 @@
   "last_error"
  ],
  "fields": [
+  {
+   "fieldname": "overview_html",
+   "fieldtype": "HTML",
+   "label": "Overview"
+  },
+  {
+   "fieldname": "section_break_settings",
+   "fieldtype": "Section Break",
+   "label": "Settings"
+  },
   {
    "default": "0",
    "fieldname": "enabled",
@@ -95,6 +111,28 @@
    "fieldtype": "Password",
    "label": "Meta Access Token",
    "description": "Meta access key with catalog permission (and WhatsApp permission if you also send products from here)."
+  },
+  {
+   "fieldname": "section_break_shop",
+   "fieldtype": "Section Break",
+   "label": "Shop"
+  },
+  {
+   "fieldname": "storefront",
+   "fieldtype": "Link",
+   "label": "Web Shop",
+   "options": "Storefront Profile",
+   "description": "The web shop this catalog copies: its products, hidden items, prices, stock and product pages. Empty = the only enabled shop."
+  },
+  {
+   "fieldname": "column_break_shop",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "product_link_base",
+   "fieldtype": "Data",
+   "label": "Product Page Address",
+   "description": "Where a shopper lands from Facebook or Instagram, e.g. https://mitienda.mx. Empty = the shop's first domain."
   },
   {
    "fieldname": "section_break_defaults",
@@ -328,7 +366,7 @@
  ],
  "issingle": 1,
  "links": [],
- "modified": "2026-09-27 12:00:00.000000",
+ "modified": "2026-10-27 20:00:00.000000",
  "modified_by": "Administrator",
  "module": "Doco Meta Catalog",
  "name": "Meta Catalog Settings",

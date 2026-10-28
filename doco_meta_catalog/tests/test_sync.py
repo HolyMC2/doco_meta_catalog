@@ -48,13 +48,18 @@ def _leaf(name, **kw):
     }
 
 
-def _run(leaves, prices, levels, settings, image_pass=True, vmeta=None, gtins=None):
+SHOP = "https://shop.example.com"
+
+
+def _run(leaves, prices, levels, settings, image_pass=True, vmeta=None, gtins=None, held=None):
     """Drive _build_payloads with patched storefront helpers. ``image_pass`` simulates the
     storefront image guard: True → echo the raw path (public), False → None (private/signed).
-    ``vmeta`` overrides the variant-metadata resolver (default {} → group by template)."""
-    with patch.object(sync, "_eligible_leaves", return_value=leaves), \
+    ``vmeta`` overrides the variant-metadata resolver (default {} → group by template).
+    ``held`` is the quote's per-item price holds. The shop is pinned to no profile + SHOP."""
+    with patch.object(sync, "_shop", return_value=(None, SHOP)), \
+         patch.object(sync, "_eligible_leaves", return_value=leaves), \
          patch.object(sync, "_variant_meta", return_value=(vmeta or {})), \
-         patch("doco_meta_catalog.catalog_pricing.quote", return_value={"base_rates": prices}), \
+         patch("doco_meta_catalog.catalog_pricing.quote", return_value={"base_rates": prices, "held": held or {}}), \
          patch.object(sync.sf, "_stock_levels", return_value=levels), \
          patch.object(sync.sf, "_feed_gtins", return_value=(gtins or {})), \
          patch("doco.docoutils.storefront._common._image_urls", side_effect=lambda raws, **kw: {
@@ -83,7 +88,7 @@ class TestBuildPayloads(unittest.TestCase):
         self.assertEqual(d["availability"], "in stock")
         self.assertEqual(d["condition"], "new")
         self.assertEqual(d["brand"], "Anker")
-        self.assertEqual(d["link"], "https://shop.example.com/shop/IT-A")  # Meta field is 'link'
+        self.assertEqual(d["link"], "https://shop.example.com/producto/IT-A")  # the shop's product page
         self.assertEqual(d["image_link"], "https://shop.example.com/files/x.png")
         self.assertEqual(d["visibility"], "staging")  # default = hidden until reviewed
         self.assertNotIn("item_group_id", d)
@@ -105,7 +110,7 @@ class TestBuildPayloads(unittest.TestCase):
     def test_unpriced_item_skipped(self):
         reqs, skipped = _run([_leaf("IT-A")], {}, {"IT-A": "in"}, FakeSettings())
         self.assertEqual(reqs, [])
-        self.assertEqual(skipped, [{"code": "IT-A", "reason": "no Item Price in selling price list"}])
+        self.assertEqual(skipped, [{"code": "IT-A", "kind": "unpriced", "reason": "no Item Price in selling price list"}])
 
     def test_private_image_skipped_without_fallback(self):
         reqs, skipped = _run([_leaf("IT-A")], {"IT-A": 10.0}, {"IT-A": "in"}, FakeSettings(), image_pass=False)
@@ -134,6 +139,8 @@ class TestBuildPayloads(unittest.TestCase):
             {"IT-A-RED": 50.0}, {"IT-A-RED": "in"}, FakeSettings(),
         )
         self.assertEqual(reqs[0]["data"]["item_group_id"], "IT-A")
+        # The storefront has no page per variant: the link opens the template's picker.
+        self.assertEqual(reqs[0]["data"]["link"], "https://shop.example.com/producto/IT-A")
 
     def test_variant_template_name_no_split(self):
         # template-only grouping: the group is named after the TEMPLATE, not the variant
@@ -243,7 +250,83 @@ class TestBuildPayloads(unittest.TestCase):
             FakeSettings(category_map=cmap),
         )
         self.assertEqual(reqs, [])
-        self.assertEqual(skipped, [{"code": "IT-A", "reason": "item group excluded from Meta catalog"}])
+        self.assertEqual(skipped, [{"code": "IT-A", "kind": "excluded", "reason": "item group excluded from Meta catalog"}])
+
+    def test_held_price_skipped_others_sent(self):
+        # One item with two current prices must not stop the rest of the catalog.
+        hold = {"kind": "duplicate_price", "reason": "2 current prices"}
+        reqs, skipped = _run(
+            [_leaf("IT-A"), _leaf("IT-B")], {"IT-B": 50.0}, {"IT-A": "in", "IT-B": "in"},
+            FakeSettings(), held={"IT-A": hold},
+        )
+        self.assertEqual([r["data"]["id"] for r in reqs], ["IT-B"])
+        self.assertEqual(skipped, [{"code": "IT-A", **hold}])
+
+    def test_product_link_quotes_slug(self):
+        with patch.object(sync.sf, "_slugify", side_effect=lambda s: s.lower()):
+            self.assertEqual(sync._product_link("https://a.mx", {"name": "V-1", "variant_of": "Tpl A/B"}),
+                             "https://a.mx/producto/tpl%20a%2Fb")
+
+
+class TestShopScope(unittest.TestCase):
+    def test_profile_filters_leaves(self):
+        rows = [{"name": "IT-A", "variant_of": None}, {"name": "IT-B", "variant_of": None}]
+        with patch.object(sync.frappe.db, "get_values", return_value=rows), \
+             patch.object(sync.sf, "_scoped_products", return_value={"IT-B"}) as scoped:
+            leaves = sync._eligible_leaves(profile={"name": "shop"})
+        self.assertEqual([l["name"] for l in leaves], ["IT-B"])
+        scoped.assert_called_once_with(["IT-A", "IT-B"], {"name": "shop"})
+
+    def _shop(self, settings, enabled, domains=""):
+        def get(key):
+            return settings.get(key)
+        fake = MagicMock(get=get)
+        with patch.object(sync.frappe.db, "exists", return_value=True), \
+             patch.object(sync.frappe, "get_all", return_value=enabled), \
+             patch.object(sync.frappe.db, "get_value", return_value=domains), \
+             patch.object(sync.sf, "_profile", side_effect=lambda name: {"name": name}), \
+             patch.object(sync, "get_url", return_value="https://site.example"):
+            return sync._shop(fake)
+
+    def test_single_shop_uses_its_first_domain(self):
+        profile, origin = self._shop({}, ["main"], "\n Tienda.Example.MX \nother.mx")
+        self.assertEqual(profile, {"name": "main"})
+        self.assertEqual(origin, "https://tienda.example.mx")
+
+    def test_address_override_wins(self):
+        _, origin = self._shop({"product_link_base": "https://x.mx/"}, ["main"], "tienda.mx")
+        self.assertEqual(origin, "https://x.mx")
+
+    def test_several_shops_fall_back_to_site(self):
+        profile, origin = self._shop({}, ["a", "b"])
+        self.assertIsNone(profile)
+        self.assertEqual(origin, "https://site.example")
+
+
+class TestHeldItems(unittest.TestCase):
+    HOLD = {"code": "IT-A", "kind": "duplicate_price", "reason": "2 current prices"}
+
+    def test_push_one_held_is_blocked_not_deleted(self):
+        with patch.object(sync, "_get_settings", return_value=FakeSettings()), \
+             patch.object(sync, "_build_payloads", return_value=([], [self.HOLD])), \
+             patch.object(sync, "_post_items_batch") as post:
+            out = sync._push_one("IT-A")
+        self.assertEqual(out["state"], "Blocked")
+        self.assertEqual(out["reason_code"], "catalog_price_review")
+        post.assert_not_called()
+
+    def test_full_reconcile_keeps_held_items(self):
+        reqs = [{"method": "UPDATE", "data": {"id": "IT-B"}}]
+        with patch.object(sync, "_get_settings", return_value=FakeSettings()), \
+             patch.object(sync, "_build_payloads", return_value=(reqs, [self.HOLD])), \
+             patch("doco_meta_catalog.publication.known_items", return_value=["IT-A", "IT-B", "IT-C"]), \
+             patch.object(sync, "_post_items_batch", return_value="PUB-1") as post, \
+             patch.object(sync.frappe.db, "set_single_value"):
+            out = sync.full_reconcile()
+        sent = post.call_args.args[1]
+        self.assertIn({"method": "DELETE", "data": {"id": "IT-C"}}, sent)
+        self.assertNotIn({"method": "DELETE", "data": {"id": "IT-A"}}, sent)
+        self.assertEqual((out["removals"], out["held"]), (1, 1))
 
 
 class TestOutboundGuard(unittest.TestCase):

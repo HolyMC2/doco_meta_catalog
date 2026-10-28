@@ -57,7 +57,14 @@ scheduler_events = {
     "daily": [
         "doco_meta_catalog.sync.full_reconcile",
     ],
+    # Read-only: what Meta shows (review, visibility, channels) for the management page.
+    "daily_long": [
+        "doco_meta_catalog.diagnostics.daily_check",
+    ],
 }
+
+# Item form: is this product on Facebook/Instagram/WhatsApp, and if not, why.
+doctype_js = {"Item": "public/js/item_meta_catalog.js"}
 
 # Raw receipt/cart evidence is available only through the conversation-authorized broker.
 permission_query_conditions = {

@@ -38,6 +38,8 @@ class CatalogFixture:
         self.enterContext(patch.object(frappe.db, "commit"))
         self.enterContext(patch.object(frappe, "request", None))
         self.enterContext(patch.object(frappe.local, "conf", frappe._dict(frappe.conf)))
+        # The template site may carry a web shop whose scope would hide the fixture item.
+        self.enterContext(patch("doco_meta_catalog.sync._shop", return_value=(None, "https://shop.example.invalid")))
         frappe.conf.maintenance_mode = 0
         frappe.conf.meta_catalog_block_outbound = 0
         self.key = uuid4().hex[:12]
@@ -214,6 +216,25 @@ class TestCatalogCommerce(CatalogFixture, unittest.TestCase):
             commerce.dispatch_reason(intent, self.account, json.loads(intent.payload)),
             "catalog_configuration_changed",
         )
+
+    def test_duplicate_current_price_holds_only_that_item(self):
+        from doco_meta_catalog import catalog_pricing, sync
+
+        frappe.get_doc({
+            "doctype": "Item Price", "item_code": self.item.name, "price_list": self.price_list.name,
+            "price_list_rate": 99, "valid_from": "2020-01-01",
+        }).insert()
+        settings = frappe.get_doc("Meta Catalog Settings")
+        with self.assertRaises(frappe.ValidationError):
+            catalog_pricing.quote([self.item.name], settings)
+        held = catalog_pricing.quote([self.item.name], settings, hold=True)
+        self.assertEqual(held["base_rates"], {})
+        self.assertEqual(held["held"][self.item.name]["kind"], "duplicate_price")
+        reqs, skipped = sync._build_payloads([self.item.name], settings)
+        self.assertEqual(reqs, [])
+        self.assertEqual([row["kind"] for row in skipped], ["duplicate_price"])
+        with self.assertRaises(frappe.ValidationError):
+            self.frozen()
 
     def test_wrong_binding_never_chooses_default_account(self):
         other = self.new_account()
