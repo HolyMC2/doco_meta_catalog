@@ -225,7 +225,9 @@ def _catalog_snapshot(doc, selection, *, lock=False):
     codes = sorted({row["item_code"] for row in requested_lines(order)
                     if isinstance(row["item_code"], str) and 0 < len(row["item_code"]) <= 140})
     currency = settings.default_currency
-    price_list = single("Selling Settings", "selling_price_list")
+    # The cart is reviewed against the shop the catalog copies: its price list and its gate.
+    profile, _origin = sync._shop(settings)
+    price_list = profile["price_list"] if profile else single("Selling Settings", "selling_price_list")
     binding_ok = settings.whatsapp_account == doc.whatsapp_account and bool(settings.catalog_id and currency)
     price_list_ok = price_list and frappe.db.get_value("Price List", price_list, ["enabled", "selling", "currency"], as_dict=True, for_update=lock)
     issues = []
@@ -254,7 +256,7 @@ def _catalog_snapshot(doc, selection, *, lock=False):
         if not frappe.has_permission("Item", "read", doc=row.name):
             raise frappe.PermissionError("Item read permission is required for cart review.")
     groups = sync._group_overrides(settings)
-    eligible = {row["name"] for row in sync._eligible_leaves(codes, lock=lock)
+    eligible = {row["name"] for row in sync._eligible_leaves(codes, lock=lock, profile=profile)
                 if not groups.get(row["item_group"], {}).get("exclude")
                 and groups.get(row["item_group"], {}).get("visibility") != "staging"}
     items = {row.name: {"item_name": row.item_name, "published": row.name in eligible and bool(row.is_sales_item),

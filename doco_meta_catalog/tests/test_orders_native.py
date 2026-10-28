@@ -38,6 +38,8 @@ class TestOrdersNative(IntegrationTestCase):
         self.enterContext(patch("frappe.sendmail"))
         self.enterContext(patch("frappe.enqueue"))
         self.enterContext(patch("frappe.publish_realtime"))
+        # No web shop: the cart is reviewed against the Selling Settings list below.
+        self.enterContext(patch("doco_meta_catalog.sync._shop", return_value=(None, "https://shop.example.invalid")))
         self.prefix = "cart-" + uuid4().hex[:10]
         self.peer = "5215550100888"
         self.account = self.account_fixture()
