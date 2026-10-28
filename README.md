@@ -33,8 +33,15 @@ brand/condition, optional `category_map` (item group → condition / google cate
 - `Item.on_trash` → same path with `method=DELETE`
 - Daily cron `full_reconcile` re-pushes everything (safety net for missed events)
 - `dry_run()` builds the whole payload WITHOUT posting — inspect parity + skip reasons first
+- One web shop (Storefront Profile) per catalog: its hidden items, scope, price list,
+  warehouses and domain; product links go to `/producto/<slug>` on that domain
+- An item with a price problem (two current prices, its own pricing rule) is held at its
+  last Meta price; the rest of the catalog still syncs
+- Desk: **Meta Catalog Settings** shows what reaches Meta and what needs fixing, with an
+  action per problem; the Item form shows each product's Meta status. A daily read-only check
+  reads Meta's review per product
 - `wa_helpers.send_product_list(to, sections, body)` — send catalog messages over WhatsApp
 
 ## Status
-v0.2.0 — storefront-parity sync (`d8fa363`). INSTALLED on prod `ventas.docomexico.com`
-2026-06-26 with `enabled=0`; awaiting a real `catalog_id`/token. See `AGENTS.md` → Outstanding.
+Live on prod `ventas.docomexico.com` (catalog enabled; products still `staging`). Not
+installed on Mumu: see `docs/mumu-enablement.md`. Open items: `AGENTS.md` → Outstanding.

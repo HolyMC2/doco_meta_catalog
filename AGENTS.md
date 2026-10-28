@@ -71,7 +71,7 @@ doco_meta_catalog/
     "condition": <category_map override> or default_condition or "new",
     "price": int(price_list_rate * (1+markup/100) * 100),  # Item Price, minor units (MXN cents)
     "currency": "MXN",
-    "link": f"{base}/shop/{item.name}",    # Meta field is `link` (NOT `url`)
+    "link": f"{origin}/producto/{slug(variant_of or name)}",  # Meta field is `link`; variants open the template page
     "image_link": <public HTTPS>,          # storefront _image_url guard; else fallback_image_url
     "brand": item.brand or default_brand,
     "item_group_id": item.variant_of,      # only for variant leaves — groups variants
@@ -82,6 +82,20 @@ doco_meta_catalog/
 POSTed to `/{catalog_id}/items_batch` with `item_type=PRODUCT_ITEM`. An item with no
 Item Price OR no public image is SKIPPED (never sent) — same as the storefront. Use the
 whitelisted `dry_run()` to inspect the full payload + skip reasons WITHOUT posting.
+
+Every skipped row carries a `kind`: `excluded`, `unpriced`, `no_image`, or a held kind
+(`sync.HELD_KINDS`: `duplicate_price`, `price_rule`). A held item has two current
+generic prices, or a pricing rule scoped to it. It is neither updated nor deleted: Meta keeps
+its last good price, `push_one` returns `Blocked/catalog_price_review`, `full_reconcile`
+leaves it out of removals. Only rules that apply to every item still block the whole
+catalog (`catalog_pricing._rule_hits`). Orders keep the strict quote.
+
+### Shop (`sync._shop`)
+The catalog copies one Storefront Profile: `Meta Catalog Settings.storefront`, or the only
+enabled profile. It uses that shop's `_scoped_products` gate (scope, hidden items,
+included/excluded groups), price list, warehouses and low-stock threshold, and links to its
+first domain (`product_link_base` overrides). No profile or several profiles: cell defaults
+and `get_url()`. The WhatsApp cart review (`orders._catalog_snapshot`) uses the same shop.
 
 ### Image URL gotcha (MUST resolve to public HTTPS)
 - Meta scrapes `image_link` from outside the network. If the URL is auth-gated or non-public, sync silently fails.
@@ -102,6 +116,17 @@ whitelisted `dry_run()` to inspect the full payload + skip reasons WITHOUT posti
 - Webhook routes to `wa_helpers.handle_order_message(message, account_name)`
 - Resolves customer via CRM `get_contact_by_phone_number`, creates draft Sales Order, attaches buyer note
 - Checkout happens OFF-WhatsApp (MX market — Meta-hosted checkout is US/IN/BR only); send payment link as next message (Mercado Pago Checkout Pro or similar)
+
+### Management (Desk)
+- **Meta Catalog Settings** opens on an overview (`management.overview`, cached 15 min per
+  settings revision): ready / on Meta / not sent by kind / last full send, a "What needs
+  you" list with one action each (`_todo`), and the Catalog menu (Send all now, Check Meta
+  now, Look up a product, Preview the catalog).
+- **Item form**: one status line for published items (`management.item_status`) and
+  "Send to Meta now".
+- **Checks**: `diagnostics.daily_check` (`daily_long`) reads Meta every day and stores
+  per-item rows on Sundays and on manual checks (`queue_check`). Diagnostic history cannot be
+  deleted, so daily item rows would only pile up.
 
 ## Setup (when ready to wire prod)
 
@@ -146,6 +171,20 @@ ssh contavm 'cd ~/muelle && docker compose exec -T backend bash -c \
 ```
 
 ## Outstanding work
+
+State read from prod 2026-10-27 (evidence: `~/muelle-releases/meta-catalog-audit-20261027/`):
+- [ ] **Marco / data**: 7 Item Prices are duplicated on doco. Since the `meta-catalog-manage` lane
+  they hold only those items. Fix them from the overview's "Open these prices".
+- [ ] **Marco**: doco has 2,733 products on Meta, all `staging`, so shoppers see none. Use
+  "Show products to shoppers" after the release that carries this lane.
+- [ ] **Release**: links sent before this lane were `/shop/<code>` and 404. The first full send
+  after the roll rewrites every link to `/producto/<slug>`.
+- [ ] **Mumu**: `docs/mumu-enablement.md`.
+- [ ] **Token**: both sites use Marco's user token; move to a System User token.
+- [ ] storefront `feed.xml` links variants to `/producto/<variant>` (404). Fix in doco
+  `product_feed` / muelle-storefront, not here.
+
+Older items:
 
 - [x] Storefront-parity refactor of `sync.py` (gate/price/stock/image) + variant grouping + category map — commit `d8fa363`, 11/11 unit tests, dry-tested on lab + prod
 - [x] Installed on prod `ventas.docomexico.com` (2026-06-26), `enabled=0`

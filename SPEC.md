@@ -121,8 +121,8 @@ instead of silent message loss). 37 unit tests.
 - **Atomic idempotency** — replace the `db.exists(po_no)` TOCTOU with DB-enforced uniqueness (a
   dedup doctype with a UNIQUE WhatsApp message id, insert-first) so concurrent Meta retries cannot
   create duplicate draft Sales Orders.
-- **Storefront Profile `hidden_items`** — thread the authoritative profile's hidden set into both the
-  push gate and the order gate (add a `storefront` link to Meta Catalog Settings to pick the profile).
+- ~~**Storefront Profile `hidden_items`**~~ — done 2026-10-27: `Meta Catalog Settings.storefront` picks
+  the profile; `_scoped_products` gates both the push and the cart review.
 - **Phone canonicalization** in `_find_or_create_customer` (match crm normalization) to avoid forking
   duplicate Customers.
 - **End-to-end webhook tests** — tampered-body POST → 403 + zero rows written; concurrent duplicate delivery.
@@ -143,7 +143,7 @@ limiter to bind; a global per-bucket cap backstops until then.
 - **P3** — security: batch 1 (senders/logs) **done**; batch 2 (inbound HMAC + hardened order→SO).
 - **P4** — WhatsApp catalog messages tested end-to-end; `sale_price` from storefront `_sale_prices`; populate `category_map` (e.g. Seminuevos→refurbished); `fallback_image_url` for photoless priced items.
 - **P5** — multi-surface: FB/IG Shop when eligible, collections/sets, dynamic-ads feed (same `catalog_id`, no new sync code).
-- **P6** — multi-tenant: mumulenceria own `catalog_id` + own Settings per site; optional Storefront Profile scope parity (included/excluded groups).
+- **P6** — multi-tenant: mumulenceria own `catalog_id` + own Settings per site (`docs/mumu-enablement.md`); Storefront Profile scope parity done 2026-10-27.
 - **P7** — reliability: per-`handle` ingestion-error reconciliation, delta sync (only changed since last reconcile), retry/backoff, observability metrics (synced/skipped/errors), optional scheduled feed-URL fallback.
 
 ---
