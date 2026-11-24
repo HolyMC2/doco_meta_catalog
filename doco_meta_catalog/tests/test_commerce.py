@@ -236,6 +236,40 @@ class TestCatalogCommerce(CatalogFixture, unittest.TestCase):
         with self.assertRaises(frappe.ValidationError):
             self.frozen()
 
+    def test_promotion_sends_the_shop_sale_price(self):
+        from frappe.utils import add_days, today
+
+        from doco_meta_catalog import catalog_pricing, sync
+
+        # In the company currency, so ERPNext prices the order without an exchange rate.
+        company = frappe.defaults.get_global_default("company")
+        currency = frappe.get_cached_value("Company", company, "default_currency")
+        promo_list = frappe.get_doc({"doctype": "Price List", "price_list_name": "Promo " + self.key,
+                                     "selling": 1, "enabled": 1, "currency": currency}).insert()
+        frappe.get_doc({"doctype": "Item Price", "item_code": self.item.name, "price_list": promo_list.name,
+                        "price_list_rate": 150}).insert()
+        frappe.db.set_single_value("Selling Settings", "selling_price_list", promo_list.name)
+        frappe.db.set_single_value("Meta Catalog Settings", "default_currency", currency)
+        frappe.get_doc({
+            "doctype": "Pricing Rule", "title": "Promo " + self.key, "apply_on": "Item Code",
+            "items": [{"item_code": self.item.name}], "selling": 1, "currency": currency,
+            "price_or_product_discount": "Price", "rate_or_discount": "Discount Percentage",
+            "discount_percentage": 50, "valid_from": today(), "valid_upto": add_days(today(), 7),
+        }).insert()
+        settings = frappe.get_doc("Meta Catalog Settings")
+        with self.assertRaises(frappe.ValidationError):
+            catalog_pricing.quote([self.item.name], settings)  # carts keep the strict quote
+        reqs, skipped = sync._build_payloads([self.item.name], settings)
+        self.assertEqual(skipped, [])
+        data = reqs[0]["data"]
+        self.assertEqual(data["price"], f"150.00 {currency}")
+        self.assertEqual(data["sale_price"], f"75.00 {currency}")
+        start, end = data["sale_price_effective_date"].split("/")
+        self.assertTrue(start.startswith(today() + "T00:00"))
+        self.assertTrue(end.startswith(add_days(today(), 7) + "T23:59"))
+        # The publication worker's rebuild is the same bytes (it is compared before posting).
+        self.assertEqual(sync._build_payloads([self.item.name], settings, lock=True)[0], reqs)
+
     def test_wrong_binding_never_chooses_default_account(self):
         other = self.new_account()
         frappe.db.set_value("WhatsApp Account", other.name, "is_default_outgoing", 1)

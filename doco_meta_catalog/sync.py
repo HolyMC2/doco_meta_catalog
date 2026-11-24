@@ -235,13 +235,102 @@ def _public_image(item: dict, settings, *, images=None, lock=False) -> str | Non
     return None
 
 
-def _build_payloads(item_codes: list[str] | None, settings, *, lock=False) -> tuple[list[dict], list[dict]]:
+_PROMO_CHUNK = 200  # lines per unsaved order; ERPNext prices a line in ~40 ms
+
+
+def _promotions(ruled: dict, prices: dict, profile, price_list, *, price=True) -> tuple[dict, dict]:
+    """The shop's promotional rate for items an automatic pricing rule touches:
+    ``({code: rate}, {code: hold})``. Same pricing as the web shop's cards
+    (``storefront._cards._priced_lines``: ERPNext's own pricing on an unsaved order, as the
+    guest shopper; writes nothing), so Meta shows the sale the shop shows. An item the rule
+    does not discount for a shopper is absent and keeps its list price. A rule that reads the
+    rest of the order or past sales has no single price per item, and a pricing failure has
+    no trustworthy price: both are held, so Meta keeps its last price. ``price=False`` only
+    finds the holds a rule causes (a preview's counts)."""
+    codes = [code for code in ruled if prices.get(code)]
+    if not codes:
+        return {}, {}
+    from doco.docoutils.storefront import _cards
+
+    def hold(chunk, reason):
+        return {code: {"kind": "price_rule", "reason": reason.format(
+            ", ".join(rule["name"] for rule in ruled[code]))} for code in chunk}
+
+    if _cards._sale_rule_coverage().get("cross_line"):
+        return {}, hold(codes, frappe._("A pricing rule ({0}) depends on the rest of the order, so this product has no single price to show."))
+    if not price:
+        return {}, {}
+    prof = profile or {"price_list": price_list}
+    keys = {code: _promo_key(code, prices[code], ruled[code], prof) for code in codes}
+    sales: dict = {}
+    held: dict = {}
+    missing = []
+    for code in codes:
+        hit = frappe.cache.get_value(keys[code])
+        if hit is None:
+            missing.append(code)
+        elif flt(hit):
+            sales[code] = flt(hit)
+    for i in range(0, len(missing), _PROMO_CHUNK):
+        chunk = missing[i:i + _PROMO_CHUNK]
+        rates = _cards._priced_lines(chunk, {code: prices[code] for code in chunk}, prof)
+        if rates is None:
+            held.update(hold(chunk, frappe._("The promotion price of a pricing rule ({0}) could not be worked out. Meta keeps the last price.")))
+            continue
+        for code in chunk:
+            # 0.0 = «no sale for a shopper», so it is not priced again either.
+            frappe.cache.set_value(keys[code], flt(rates.get(code)), expires_in_sec=_PROMO_TTL)
+            if rates.get(code):
+                sales[code] = flt(rates[code])
+    return sales, held
+
+
+_PROMO_TTL = 6 * 3600
+
+
+def _promo_key(code, rate, rules, prof) -> str:
+    """Cache key of one item's promotion price. The publication worker rebuilds a batch under
+    row locks just before it posts; the key lets it reuse the price instead of re-running
+    ERPNext pricing there. It holds everything the price is read from: the day, the shop's list
+    and company, the item, its list price and each rule's last change."""
+    from doco_meta_catalog.publication_contract import digest
+
+    return "meta_catalog_promo:" + digest([
+        today(), prof.get("price_list") or "", prof.get("company") or "", code, f"{flt(rate):.6f}",
+        sorted([rule["name"], str(rule.get("modified") or "")] for rule in rules),
+    ])
+
+
+def _sale_window(rules: list[dict]) -> str | None:
+    """ISO 8601 interval for Meta ``sale_price_effective_date``: from the latest start to the
+    earliest end of the item's rules, in the site's time zone, so Meta drops the sale on its
+    own when the promotion ends. None (sale stands until the next send) when no rule ends."""
+    from datetime import datetime, time as clock
+    from zoneinfo import ZoneInfo
+
+    from frappe.utils import get_system_timezone, getdate
+
+    ends = [getdate(rule["valid_upto"]) for rule in rules if rule.get("valid_upto")]
+    if not ends:
+        return None
+    starts = [getdate(rule["valid_from"]) for rule in rules if rule.get("valid_from")]
+    zone = ZoneInfo(get_system_timezone())
+    start = datetime.combine(max(starts) if starts else getdate(today()), clock(0, 0), zone)
+    end = datetime.combine(min(ends), clock(23, 59), zone)
+    return f"{start.isoformat(timespec='minutes')}/{end.isoformat(timespec='minutes')}"
+
+
+def _build_payloads(item_codes: list[str] | None, settings, *, lock=False,
+                    promotions=True) -> tuple[list[dict], list[dict]]:
     """Build the items_batch ``requests`` array for the eligible items.
 
     Returns ``(requests, skipped)`` where each ``skipped`` is ``{code, kind, reason}``. An item
     is skipped (never sent) when it has no selling price or no public image — exactly the cases
     the storefront would also refuse to sell, so the two surfaces stay identical. Kinds in
-    ``HELD_KINDS`` are price problems on one item: callers keep that item as Meta has it."""
+    ``HELD_KINDS`` are price problems on one item: callers keep that item as Meta has it.
+
+    An item on promotion carries the shop's sale price (``sale_price``) next to its list price.
+    ``promotions=False`` skips that pricing (a preview's counts); never send such payloads."""
     profile, origin = _shop(settings)
     leaves = _eligible_leaves(item_codes, lock=lock, profile=profile)
     if not leaves:
@@ -256,15 +345,15 @@ def _build_payloads(item_codes: list[str] | None, settings, *, lock=False) -> tu
     pricing = quote(names, settings, lock=lock, hold=True,
                     price_list=profile["price_list"] if profile else None)
     prices = pricing["base_rates"]
-    held = pricing.get("held") or {}
+    held = dict(pricing.get("held") or {})
+    ruled = pricing.get("ruled") or {}
+    sales, promo_held = _promotions(ruled, prices, profile, pricing.get("price_list"), price=promotions)
+    held.update(promo_held)
     # 'out' | 'low' | 'in'; services always 'in'
     if profile:
         levels = sf._stock_levels(names, profile["warehouses"], profile["low_threshold"], lock=lock)
     else:
         levels = sf._stock_levels(names, lock=lock)
-    # Generic catalog prices cannot safely quote customer/quantity Pricing Rules.
-    # quote() visibly blocks that configuration; never call _sale_prices here:
-    # it elevates, inserts a throwaway Sales Order and rolls back the caller.
     overrides = _group_overrides(settings)
     # Default 0 → Meta price == the exact shop price (parity). A shop may opt into a markup.
     markup = 1 + flt(settings.price_markup_percent) / 100.0
@@ -339,40 +428,16 @@ def _build_payloads(item_codes: list[str] | None, settings, *, lock=False) -> tu
             data["color"] = vm["color"]  # Meta variant option
         if ov.get("google_product_category"):
             data["google_product_category"] = ov["google_product_category"]
-        # MA-5: discounted price (struck-through original kept as `price`). markup applied
-        # to both so sale_price < price holds. effective_date only when bounded.
+        # The shop's promotion: the list price stays `price` (struck through on Meta), the
+        # sale is `sale_price`; markup on both keeps sale_price < price.
+        sale = sales.get(code)
+        if sale and flt(sale) < flt(rate):
+            data["sale_price"] = _format_price(flt(sale) * markup, currency)
+            window = _sale_window(ruled.get(code) or [])
+            if window:
+                data["sale_price_effective_date"] = window
         reqs.append({"method": "UPDATE", "data": data})
     return reqs, skipped
-
-
-def _sale_window() -> str | None:
-    """ISO8601 interval for Meta ``sale_price_effective_date``, derived from the
-    active price-discount selling Pricing Rules' date bounds (MX/CST, -06:00).
-
-    Returns None when ANY active sale rule is open-ended (no valid_upto) — then we
-    omit the field and let the sale stand until the next sync clears it. The window
-    is shop-level (min start .. max end); for the common single-promo case it is
-    exact, and the daily reconcile corrects any multi-rule drift."""
-    td = today()
-    starts: list[str] = []
-    ends: list[str] = []
-    for r in frappe.get_all(
-        "Pricing Rule",
-        filters={"selling": 1, "disable": 0, "coupon_code_based": 0, "price_or_product_discount": "Price"},
-        fields=["valid_from", "valid_upto"], limit=50,
-    ):
-        vf, vu = r.get("valid_from"), r.get("valid_upto")
-        if vf and str(vf) > td:
-            continue  # not started
-        if vu and str(vu) < td:
-            continue  # already ended
-        starts.append(str(vf) if vf else td)
-        if not vu:
-            return None  # an open-ended active rule → don't constrain the window
-        ends.append(str(vu))
-    if not ends:
-        return None
-    return f"{min(starts)}T00:00:00-06:00/{max(ends)}T23:59:59-06:00"
 
 
 # ---------------- durable publication ----------------
@@ -585,7 +650,9 @@ def dry_run(limit: int = 20):
 def preview(settings, limit=20) -> dict:
     """What a full sync would send, and every item it would leave out, grouped by why."""
     profile, origin = _shop(settings)
-    reqs, skipped = _build_payloads(None, settings)
+    # Pricing every promotion costs ~40 ms an item: count without it, price only the sample.
+    reqs, skipped = _build_payloads(None, settings, promotions=False)
+    sample, _held = _build_payloads([r["data"]["id"] for r in reqs[:limit]], settings) if reqs[:limit] else ([], [])
     by_kind: dict[str, list] = {}
     for row in skipped:
         by_kind.setdefault(row["kind"], []).append(row)
@@ -595,7 +662,7 @@ def preview(settings, limit=20) -> dict:
         "skipped_detail": skipped[:limit],
         "by_kind": {kind: len(rows) for kind, rows in by_kind.items()},
         "examples": {kind: rows[:limit] for kind, rows in by_kind.items()},
-        "sample": [r["data"] for r in reqs[:limit]],
+        "sample": [r["data"] for r in sample],
         "shop": profile["name"] if profile else None,
         "link_origin": origin,
         "price_list": profile["price_list"] if profile else sf._selling_price_list(),

@@ -23,7 +23,7 @@ Item unpublication, disabling, removal and lost eligibility queue DELETE intent 
 
 ## Safe generic prices
 
-`catalog_pricing.quote` reads the configured selling price list, exactly one current generic Item Price in its currency and stock UOM, and catalog markup. Ambiguous prices and active automatic Pricing Rules produce explicit blockers. It does not elevate the actor, create a throwaway Sales Order, commit, or roll back. Customer/quantity rules require the separate native order review, which must show its actual ERP price source and totals. Publisher/picker prices no longer claim an unsafe automatic storefront discount. Locking reads are propagated into source metadata, prices, stock, barcodes and image privacy.
+`catalog_pricing.quote` reads the configured selling price list, exactly one current generic Item Price in its currency and stock UOM, and catalog markup. Ambiguous prices produce explicit blockers; with `hold=True` an item with its own automatic Pricing Rule keeps its list rate and is returned in `ruled`. It does not elevate the actor, create a throwaway Sales Order, commit, or roll back. Publication then sends the web shop's guest sale price as `sale_price` (`sync._promotions`, the storefront's unsaved-order pricing; it writes nothing) and holds the item when the rule reads the rest of the order or the price cannot be worked out. Customer/quantity rules require the separate native order review, which must show its actual ERP price source and totals. Locking reads are propagated into source metadata, prices, stock, barcodes and image privacy.
 
 ## Primary references and verification limits
 

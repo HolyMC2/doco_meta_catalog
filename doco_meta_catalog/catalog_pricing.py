@@ -88,9 +88,11 @@ def quote(codes, settings, *, lock=False, price_list=None, hold=False):
     Reviewed orders must show their separate native ERP quote before creation.
 
     ``hold=True`` (catalog publication) keeps one item's price problem from stopping
-    the whole catalog: an item with duplicate current prices or its own pricing rule
-    comes back in ``held`` with the reason, and gets no rate. Rules that apply to every
-    item still stop everything. Orders keep the strict default.
+    the whole catalog: an item with duplicate current prices comes back in ``held`` with
+    the reason, and gets no rate. An item with its own pricing rule keeps its list rate
+    and comes back in ``ruled`` ({code: [{name, valid_from, valid_upto, modified}]}): the caller
+    prices the promotion the way the shop does. Rules that apply to every item still
+    stop everything. Orders keep the strict default.
     """
     day = today()
     everywhere, per_item = _rule_hits(codes, day, lock=lock)
@@ -98,13 +100,22 @@ def quote(codes, settings, *, lock=False, price_list=None, hold=False):
         frappe.throw(
             "Automatic pricing rules require an explicit customer/quantity quote. Generic catalog pricing is unavailable."
         )
-    held = {
-        code: {
-            "kind": "price_rule",
-            "reason": _("A pricing rule ({0}) changes this price for some customers or quantities.").format(
-                ", ".join(names)
-            ),
-        }
+    held = {}
+    windows = {
+        row.name: row
+        for row in frappe.db.get_values(
+            "Pricing Rule",
+            filters={"name": ["in", sorted({name for names in per_item.values() for name in names})]},
+            fieldname=["name", "valid_from", "valid_upto", "modified"],
+            limit=None,
+            as_dict=True,
+        )
+    } if per_item else {}
+    ruled = {
+        code: [
+            {key: windows[name][key] for key in ("name", "valid_from", "valid_upto", "modified")}
+            for name in names if name in windows
+        ]
         for code, names in per_item.items()
     }
     # The shop's own list when the catalog mirrors a storefront; else the default list.
@@ -228,5 +239,6 @@ def quote(codes, settings, *, lock=False, price_list=None, hold=False):
         },
         "markup": markup,
         "held": held,
+        "ruled": {code: rules for code, rules in ruled.items() if code in base},
         "source": "Current generic Item Price; catalog markup applied; automatic rules unavailable",
     }

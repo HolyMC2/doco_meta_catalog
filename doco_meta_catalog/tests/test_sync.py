@@ -51,21 +51,34 @@ def _leaf(name, **kw):
 SHOP = "https://shop.example.com"
 
 
-def _run(leaves, prices, levels, settings, image_pass=True, vmeta=None, gtins=None, held=None):
+def _run(leaves, prices, levels, settings, image_pass=True, vmeta=None, gtins=None, held=None,
+         ruled=None, sales=None, cross_line=False, cache=None, promotions=True):
     """Drive _build_payloads with patched storefront helpers. ``image_pass`` simulates the
     storefront image guard: True → echo the raw path (public), False → None (private/signed).
     ``vmeta`` overrides the variant-metadata resolver (default {} → group by template).
-    ``held`` is the quote's per-item price holds. The shop is pinned to no profile + SHOP."""
+    ``held`` is the quote's per-item price holds, ``ruled`` its items with a pricing rule;
+    ``sales`` is what the shop's order pricing returns for them (None = it failed). ``cache``
+    stands in for the promotion cache. The shop is pinned to no profile + SHOP."""
+    cache = {} if cache is None else cache
     with patch.object(sync, "_shop", return_value=(None, SHOP)), \
          patch.object(sync, "_eligible_leaves", return_value=leaves), \
          patch.object(sync, "_variant_meta", return_value=(vmeta or {})), \
-         patch("doco_meta_catalog.catalog_pricing.quote", return_value={"base_rates": prices, "held": held or {}}), \
+         patch("doco_meta_catalog.catalog_pricing.quote", return_value={
+             "base_rates": prices, "held": held or {}, "ruled": ruled or {}, "price_list": "Venta"}), \
+         patch("doco.docoutils.storefront._cards._sale_rule_coverage", return_value={"cross_line": cross_line}), \
+         patch("doco.docoutils.storefront._cards._priced_lines", return_value=sales) as priced, \
+         patch.object(sync.frappe.cache, "get_value", side_effect=cache.get), \
+         patch.object(sync.frappe.cache, "set_value", side_effect=lambda key, value, **kw: cache.__setitem__(key, value)), \
+         patch.object(sync, "today", return_value="2026-11-20"), \
+         patch("frappe.utils.get_system_timezone", return_value="America/Mazatlan"), \
          patch.object(sync.sf, "_stock_levels", return_value=levels), \
          patch.object(sync.sf, "_feed_gtins", return_value=(gtins or {})), \
          patch("doco.docoutils.storefront._common._image_urls", side_effect=lambda raws, **kw: {
              raw: raw if image_pass or raw == settings.fallback_image_url else None for raw in raws
          }):
-        return sync._build_payloads(None, settings)
+        out = sync._build_payloads(None, settings, promotions=promotions)
+    _run.priced = priced
+    return out
 
 
 class TestBuildPayloads(unittest.TestCase):
@@ -327,6 +340,107 @@ class TestHeldItems(unittest.TestCase):
         self.assertIn({"method": "DELETE", "data": {"id": "IT-C"}}, sent)
         self.assertNotIn({"method": "DELETE", "data": {"id": "IT-A"}}, sent)
         self.assertEqual((out["removals"], out["held"]), (1, 1))
+
+
+class TestPromotions(unittest.TestCase):
+    """An automatic pricing rule on an item: Meta shows the shop's sale next to the list price."""
+
+    RULE = {"name": "PRLE-1", "valid_from": "2026-11-14", "valid_upto": "2026-11-30", "modified": "2026-11-14 11:11"}
+
+    def run_promo(self, **kw):
+        leaves = kw.pop("leaves", [_leaf("FUNDA"), _leaf("CABLE")])
+        return _run(leaves, kw.pop("prices", {"FUNDA": 150.0, "CABLE": 80.0}),
+                    {"FUNDA": "in", "CABLE": "in"}, kw.pop("settings", FakeSettings()),
+                    ruled=kw.pop("ruled", {"FUNDA": [self.RULE]}), **kw)
+
+    def test_sale_price_and_window_sent_next_to_list_price(self):
+        reqs, skipped = self.run_promo(sales={"FUNDA": 75.0})
+        self.assertEqual(skipped, [])
+        funda = next(r["data"] for r in reqs if r["data"]["id"] == "FUNDA")
+        self.assertEqual(funda["price"], "150.00 MXN")
+        self.assertEqual(funda["sale_price"], "75.00 MXN")
+        # Mazatlán is UTC-7 all year: Meta ends the sale at the rule's last minute.
+        self.assertEqual(funda["sale_price_effective_date"], "2026-11-14T00:00-07:00/2026-11-30T23:59-07:00")
+        cable = next(r["data"] for r in reqs if r["data"]["id"] == "CABLE")
+        self.assertNotIn("sale_price", cable)
+        self.assertEqual(_run.priced.call_args.args[0], ["FUNDA"])
+
+    def test_markup_applies_to_the_sale_too(self):
+        reqs, _ = self.run_promo(sales={"FUNDA": 75.0}, settings=FakeSettings(price_markup_percent=10))
+        funda = next(r["data"] for r in reqs if r["data"]["id"] == "FUNDA")
+        self.assertEqual((funda["price"], funda["sale_price"]), ("165.00 MXN", "82.50 MXN"))
+
+    def test_rule_without_a_shopper_discount_sends_the_list_price(self):
+        # e.g. a wholesale customer-group rule: the shop's guest pays the list price.
+        reqs, skipped = self.run_promo(sales={})
+        self.assertEqual(skipped, [])
+        funda = next(r["data"] for r in reqs if r["data"]["id"] == "FUNDA")
+        self.assertEqual(funda["price"], "150.00 MXN")
+        self.assertNotIn("sale_price", funda)
+
+    def test_open_ended_rule_sends_the_sale_without_a_window(self):
+        rule = {**self.RULE, "valid_upto": None}
+        reqs, _ = self.run_promo(sales={"FUNDA": 75.0}, ruled={"FUNDA": [rule]})
+        funda = next(r["data"] for r in reqs if r["data"]["id"] == "FUNDA")
+        self.assertEqual(funda["sale_price"], "75.00 MXN")
+        self.assertNotIn("sale_price_effective_date", funda)
+
+    def test_window_is_latest_start_to_earliest_end(self):
+        later = {"name": "PRLE-2", "valid_from": "2026-11-16", "valid_upto": "2026-12-15", "modified": "x"}
+        no_start = {"name": "PRLE-3", "valid_from": None, "valid_upto": "2026-11-28", "modified": "x"}
+        with patch("frappe.utils.get_system_timezone", return_value="America/Mazatlan"):
+            self.assertEqual(sync._sale_window([self.RULE, later, no_start]),
+                             "2026-11-16T00:00-07:00/2026-11-28T23:59-07:00")
+            self.assertIsNone(sync._sale_window([{"name": "x", "valid_from": None, "valid_upto": None}]))
+
+    def test_pricing_failure_holds_the_item_and_sends_the_rest(self):
+        reqs, skipped = self.run_promo(sales=None)
+        self.assertEqual([r["data"]["id"] for r in reqs], ["CABLE"])
+        self.assertEqual([(row["code"], row["kind"]) for row in skipped], [("FUNDA", "price_rule")])
+        self.assertIn("PRLE-1", skipped[0]["reason"])
+
+    def test_rule_reading_the_rest_of_the_order_holds_without_pricing(self):
+        for promotions in (True, False):
+            with self.subTest(promotions=promotions):
+                reqs, skipped = self.run_promo(sales={"FUNDA": 75.0}, cross_line=True, promotions=promotions)
+                self.assertEqual([r["data"]["id"] for r in reqs], ["CABLE"])
+                self.assertEqual([row["kind"] for row in skipped], ["price_rule"])
+                _run.priced.assert_not_called()
+
+    def test_preview_counts_without_pricing(self):
+        reqs, skipped = self.run_promo(sales={"FUNDA": 75.0}, promotions=False)
+        self.assertEqual(skipped, [])
+        self.assertEqual(len(reqs), 2)
+        self.assertFalse(any("sale_price" in r["data"] for r in reqs))
+        _run.priced.assert_not_called()
+
+    def test_second_build_reuses_the_price(self):
+        # The publication worker rebuilds a batch under row locks: it must not price again.
+        cache = {}
+        first, _ = self.run_promo(sales={"FUNDA": 75.0}, cache=cache)
+        self.assertEqual(_run.priced.call_count, 1)
+        second, _ = self.run_promo(sales=None, cache=cache)  # would hold if priced again
+        _run.priced.assert_not_called()
+        self.assertEqual(first, second)
+
+    def test_no_sale_is_remembered_too(self):
+        cache = {}
+        self.run_promo(sales={}, cache=cache)
+        reqs, _ = self.run_promo(sales=None, cache=cache)  # would hold if priced again
+        _run.priced.assert_not_called()
+        self.assertEqual(len(reqs), 2)
+
+    def test_changed_rule_or_list_price_prices_again(self):
+        cache = {}
+        self.run_promo(sales={"FUNDA": 75.0}, cache=cache)
+        edited = {**self.RULE, "modified": "2026-11-20 09:00"}
+        reqs, _ = self.run_promo(sales={"FUNDA": 60.0}, cache=cache, ruled={"FUNDA": [edited]})
+        self.assertEqual(_run.priced.call_count, 1)
+        funda = next(r["data"] for r in reqs if r["data"]["id"] == "FUNDA")
+        self.assertEqual(funda["sale_price"], "60.00 MXN")
+        reqs, _ = self.run_promo(sales={"FUNDA": 90.0}, cache=cache, ruled={"FUNDA": [edited]},
+                                 prices={"FUNDA": 180.0, "CABLE": 80.0})
+        self.assertEqual(_run.priced.call_count, 1)
 
 
 class TestOutboundGuard(unittest.TestCase):
