@@ -83,12 +83,22 @@ POSTed to `/{catalog_id}/items_batch` with `item_type=PRODUCT_ITEM`. An item wit
 Item Price OR no public image is SKIPPED (never sent) — same as the storefront. Use the
 whitelisted `dry_run()` to inspect the full payload + skip reasons WITHOUT posting.
 
+Promotions: an item an automatic Pricing Rule touches keeps its list price as `price` and gets
+the shop's sale as `sale_price`, priced exactly as the web shop's cards do
+(`storefront._cards._priced_lines`: ERPNext pricing on an unsaved order as the guest shopper,
+no writes), with `sale_price_effective_date` from the rules' dates in the site's time zone. A
+rule with no discount for a shopper (customer group, quantity) leaves the list price. Prices are
+cached per item (`sync._promo_key`), so the worker's locked rebuild before posting does not
+re-run ERPNext pricing (~40 ms a line).
+
 Every skipped row carries a `kind`: `excluded`, `unpriced`, `no_image`, or a held kind
 (`sync.HELD_KINDS`: `duplicate_price`, `price_rule`). A held item has two current
-generic prices, or a pricing rule scoped to it. It is neither updated nor deleted: Meta keeps
-its last good price, `push_one` returns `Blocked/catalog_price_review`, `full_reconcile`
-leaves it out of removals. Only rules that apply to every item still block the whole
-catalog (`catalog_pricing._rule_hits`). Orders keep the strict quote.
+generic prices, or a pricing rule that reads the rest of the order (mixed conditions, rule on
+other items, cumulative), or a promotion whose price could not be worked out. It is neither
+updated nor deleted: Meta keeps its last good price, `push_one` returns
+`Blocked/catalog_price_review`, `full_reconcile` leaves it out of removals. Only rules that
+apply to every item still block the whole catalog (`catalog_pricing._rule_hits`). Orders keep
+the strict quote: a WhatsApp cart becomes a native Sales Order with pricing rules on.
 
 ### Shop (`sync._shop`)
 The catalog copies one Storefront Profile: `Meta Catalog Settings.storefront`, or the only

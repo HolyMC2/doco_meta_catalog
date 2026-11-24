@@ -186,3 +186,5 @@ Web Shop,Tienda en línea
 Product Page Address,Dirección de página de producto
 "Where a shopper lands from Facebook or Instagram, e.g. https://mitienda.mx. Empty = the shop's first domain.","A dónde llega un comprador desde Facebook o Instagram, p. ej. https://mitienda.mx. Vacío = el primer dominio de la tienda."
 hidden from shoppers,oculto para los compradores
+"A pricing rule ({0}) depends on the rest of the order, so this product has no single price to show.","Una regla de precios ({0}) depende del resto del pedido, así que este producto no tiene un solo precio que mostrar."
+"The promotion price of a pricing rule ({0}) could not be worked out. Meta keeps the last price.","No se pudo calcular el precio de promoción de una regla de precios ({0}). Meta conserva el último precio."
