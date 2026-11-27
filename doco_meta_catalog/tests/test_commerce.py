@@ -177,6 +177,29 @@ class CatalogFixture:
 
 
 class TestCatalogCommerce(CatalogFixture, unittest.TestCase):
+    def test_a_bot_product_card_is_rechecked_without_a_price_snapshot(self):
+        from crm.api import catalog_commerce
+
+        frozen = catalog_commerce.bot_product(self.conversation, self.item.name, "*Catalog fixture* — $125.00")
+        payload = json.loads(frozen)
+        self.assertEqual(payload["interactive"]["action"],
+                         {"catalog_id": "9900012345", "product_retailer_id": self.item.name})
+        intent = frappe._dict(actor_user="Administrator", account_id=self.account.phone_id, payload=frozen)
+        self.assertIsNone(commerce.bot_product_reason(intent, self.account, payload))
+        self.assertIsNone(catalog_commerce.bot_product_reason(intent, payload))
+        frappe.db.set_value("Item Price", self.price.name, "price_list_rate", 130)
+        self.assertIsNone(commerce.bot_product_reason(intent, self.account, payload),
+                          "the card's own text carries its price")
+        frappe.db.set_value("Item", self.item.name, "publish_on_web", 0)
+        self.assertEqual(commerce.bot_product_reason(intent, self.account, payload), "catalog_item_unavailable")
+        self.assertIsNone(catalog_commerce.bot_product(self.conversation, self.item.name, "x"),
+                          "an item the catalog no longer publishes goes out as a photo")
+        frappe.db.set_value("Item", self.item.name, "publish_on_web", 1)
+        frappe.db.set_single_value("Meta Catalog Settings", "catalog_id", "9900099999")
+        self.assertEqual(commerce.bot_product_reason(intent, self.account, payload), "catalog_configuration_changed")
+        listing = dict(payload, interactive=dict(payload["interactive"], type="product_list"))
+        self.assertEqual(commerce.bot_product_reason(intent, self.account, listing), "catalog_producer_required")
+
     def test_real_source_price_publication_and_wire_identity(self):
         rows = commerce.get_products(self.conversation, query=self.key)
         self.assertEqual(

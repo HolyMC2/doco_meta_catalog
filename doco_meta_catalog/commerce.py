@@ -237,6 +237,25 @@ def dispatch_reason(intent, account, payload):
     return None
 
 
+def bot_product_reason(intent, account, payload):
+    """A customer bot's single product message (crm catalog_commerce.bot_product, frozen by
+    `freeze`): before it goes out, this account's catalog must still be bound and on, and
+    still publish the item. The bot's card text carries its own price; no order or cart is
+    reviewed here, so no price snapshot is pinned."""
+    try:
+        settings = _binding(account.name)
+        interactive = payload["interactive"]
+        action = interactive["action"]
+        if interactive["type"] != "product":
+            return "catalog_producer_required"
+        if action["catalog_id"] != settings.catalog_id:
+            return "catalog_configuration_changed"
+        _product_snapshot([action["product_retailer_id"]], settings, user=intent.actor_user)
+    except (KeyError, TypeError, ValueError, frappe.DoesNotExistError):
+        return "catalog_item_unavailable"
+    return None
+
+
 def get_cart(name):
     from doco_meta_catalog.orders import get_cart as handler
     return handler(name)
